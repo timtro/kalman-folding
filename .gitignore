@@ -1,32 +1,42 @@
-# Prerequisites
-*.d
+scaps.cpp
+scrap.cpp
 
-# Compiled Object files
-*.slo
-*.lo
-*.o
-*.obj
+# Cmake swawn
+CMakeCache.txt
+CMakeFiles
+Makefile
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
 
-# Precompiled Headers
-*.gch
-*.pch
+# Binaries
+a.out
 
-# Compiled Dynamic libraries
+# C extensions
 *.so
-*.dylib
-*.dll
 
-# Fortran module files
-*.mod
-*.smod
+#Emacs backups
+*~
 
-# Compiled Static libraries
-*.lai
-*.la
-*.a
-*.lib
+# Python module junk
+__pycache__/
+/__pycache__/
+/__pycache__/*
+*.py[cod]
 
-# Executables
-*.exe
-*.out
-*.app
+# Distribution / packaging
+bin/
+build/
+develop-eggs/
+dist/
+eggs/
+#lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+*.sublime-project
+*.sublime-workspace
