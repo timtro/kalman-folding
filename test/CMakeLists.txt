@@ -6,5 +6,5 @@ add_library (CATCH catch.cpp)
 
 set(testname utest-linear_least_squares)
     add_executable (${testname} ${testname}.cpp)
-    target_link_libraries (${testname} CATCH)
+    target_link_libraries (${testname} CATCH ${EIGEN3_LIBRARIES})
     create_test(${testname})

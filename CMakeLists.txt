@@ -30,10 +30,12 @@ if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
   endif(CMAKE_BUILD_TYPE MATCHES DEBUG)
 endif()
 
-find_package(benchmark)
-find_package(Eigen3)
+find_package(Eigen3 REQUIRED)
+if (EIGEN3_FOUND)
+  include_directories(${EIGEN3_INCLUDE_DIR})
+endif (EIGEN3_FOUND)
 
-enable_testing()
+  enable_testing()
 add_subdirectory (test)
 
 IF( EXISTS "${CMAKE_CURRENT_BINARY_DIR}/compile_commands.json" )
