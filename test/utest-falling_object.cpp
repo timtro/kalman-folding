@@ -1,15 +1,20 @@
 #include <Eigen/Dense>
 #include <algorithm>
+#include <array>
 #include <catch/catch.hpp>
 #include <iostream>
 #include <numeric>
 #include <tuple>
+#include <type_traits>
 #include <vector>
+
+#include "../include/matplotlibcpp.h"
+namespace plt = matplotlibcpp;
 
 using Eigen::Matrix;
 using Eigen::Matrix2d;
-using Eigen::Vector2d;
 using Eigen::RowVector2d;
+using Eigen::Vector2d;
 using Matrix1d = Eigen::Matrix<double, 1, 1>;
 
 /* Preludes:
@@ -20,7 +25,7 @@ using Matrix1d = Eigen::Matrix<double, 1, 1>;
  *
  * In [2], Beckman generalizes to the non-static case, where the
  * model includes a control input term in addition to the drift term. Beckman's
- * exhibition centres on a textbook example from Zarchan and Musoff [3] 
+ * exhibition centres on a textbook example from Zarchan and Musoff [3].
  *
  * This series of test cases explores Beckman's implementation. It's important
  * to keep in mind that this and previously explored implementations suffer
@@ -34,25 +39,83 @@ using Matrix1d = Eigen::Matrix<double, 1, 1>;
  *     Approach. 4th Ed. Ch 4.
  */
 
-
-
 TEST_CASE("") {
+  constexpr double dt = 0.1;
+  constexpr double duration = 57.5;
+  constexpr size_t numsamples = duration / dt;
+  constexpr double hInit = 600000; // ft
+  constexpr double vInit = -6000;  // ft / sec
+  constexpr double g = 32.174;     // ft / sec^2
 
-  //                             Xi        Phi       Gamma
-  using Observation = std::tuple<Matrix2d, Matrix2d, Vector2d,
-  //                              u         A         z
-                                  Matrix1d, Matrix2d, Matrix1d>;
-  //                       x            P
-  using State = std::tuple<RowVector2d, Matrix2d>;
+  using SampleDataSet = std::array<std::pair<double, double>, numsamples>;
+  //                       x         P
+  using State = std::pair<Vector2d, Matrix2d>;
+  using Observation =
+      //         Xi        Phi       Gamma     u         A            z
+      std::tuple<Matrix2d, Matrix2d, Vector2d, Matrix1d, RowVector2d, Matrix1d>;
+  // In this example, most of the `Observation` is constant, but that's not
+  // generally true. You'll see that we implement our own fold to avoid bulding
+  // a massive block of data with repeated content.
 
-  auto cume = [](Matrix1d Z) {
+  const SampleDataSet trueData = []() {
+    SampleDataSet result;
+    for (unsigned k = 0; k < numsamples; ++k) {
+      auto t = k * dt;
+      result[k] = {t, hInit + vInit * t - .5 * g * t * t};
+    }
+    return result;
+  }();
+
+  auto kalman_static = [](Matrix1d Z) {
     return [&Z](State s, Observation o) -> State {
       // with…
       const auto [x, P] = s;
       const auto [Xi, Phi, Gamma, u, A, z] = o;
-      const auto D = Z + A * P * A.transpose();
-      const auto K = P * A.transpose() * D.inverse();
-      return {x + K * (z - A * x), P - K * D * K.transpose()};
+      const auto x2 = Phi * x + Gamma * u;
+      const auto P2 = Xi + Phi * P * Phi.transpose();
+      const auto D = Z + A * P2 * A.transpose();
+      const auto K = P2 * A.transpose() * D.inverse();
+      return {x2 + K * (z - A * x2), P2 - K * D * K.transpose()};
     };
   };
+
+  const Matrix1d Zeta{0};
+  const auto P0 = Matrix2d::Identity() * 9999999999999;
+  const Matrix2d Phi = [dt]() {
+    Matrix2d m;
+    m << 1.f, dt, 0.f, 1.f;
+    return m;
+  }();
+  const Matrix2d Xi = [dt]() {
+    Matrix2d m;
+    m << dt * dt * dt / 3, dt * dt / 2, dt * dt / 2, dt;
+    m *= 100;
+    return m;
+  }();
+  const Vector2d Gamma(dt * dt / 2, dt);
+  const Matrix1d u(-g);
+  const RowVector2d A(0.f, 1.f);
+
+  auto kalman_fold = [Xi, Phi, Gamma, u, A](auto f, auto seed,
+                                            SampleDataSet data) {
+    auto accumulator = seed;
+    std::tuple<std::vector<double>, std::vector<double>, std::vector<double>,
+               std::vector<Matrix2d>>
+        plotdata;
+    for (auto datum : data) {
+      Observation obs = {Xi, Phi, Gamma, u, A, Matrix1d{datum.second}};
+      accumulator = f(accumulator, obs);
+      std::get<0>(plotdata).push_back(datum.first);
+      std::get<1>(plotdata).push_back(datum.second);
+      std::get<2>(plotdata).push_back(accumulator.first(0));
+      std::get<3>(plotdata).push_back(accumulator.second);
+    }
+    return plotdata;
+  };
+
+  const auto [time, trueHeight, hs, Ps] =
+      kalman_fold(kalman_static(Zeta), State{{0, 0}, P0}, trueData);
+  plt::plot(time, trueHeight);
+  plt::plot(time, hs);
+  plt::show();
 }
