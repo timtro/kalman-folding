@@ -28,7 +28,8 @@ auto bulk_average = [](auto xs) {
 };
 
 // Prelude 2
-TEST_CASE("Functional folding for mean on…", "[prelude2]") {
+TEST_CASE("Functional folding for mean (0-order/1-state filter)…",
+          "[prelude2]") {
   // NOT A REAL UNIT TEST: No external code dependencies.
 
   using State = std::pair<double, unsigned int>;
@@ -106,6 +107,10 @@ TEST_CASE("Static Kalman fold…", "[prelude4]") {
   using State = std::tuple<Vector4d, Matrix4d>;
   using Observation = std::tuple<RowVector4d, Matrix1d>;
 
+  // in Part 2, Beckman calls this `kalmanStatic`, which is a much better name.
+  // Because it curries in a Zeta first, it's not exactly an accumulator, it's a
+  // function that returns an accumulator.
+  //
   auto cume = [](Matrix1d Z) {
     return [&Z](State s, Observation o) -> State {
       // with…
