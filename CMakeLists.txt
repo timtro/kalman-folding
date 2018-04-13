@@ -7,16 +7,17 @@ set(CMAKE_CXX_COMPILER /usr/bin/clang++-7)
 set(CMAKE_BUILD_TYPE Debug)
 set(CMAKE_EXPORT_COMPILE_COMMANDS 1)
 
-set(c++std "-std=c++17")
+set (CMAKE_CXX_STANDARD 17)
 set(common "-fno-omit-frame-pointer -pg")
+set(profiling "-fno-omit-frame-pointer -pg")
 set(warnings "-Wall -Wextra -Werror -pedantic")
 set(optimizations_debug "-O2")
 set(optimizations_release "-O3 -flto -ffast-math")
 set(debug "-g")
 set(perf_bench "-fno-omit-frame-pointer")
 
-set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS} ${c++std} ${common} ${debug} ${warnings} ${optimizations_debug}")
-# set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS} ${c++std}")
+set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS} ${common} ${debug} ${warnings} ${optimizations_debug}")
+set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS} ${common} ${optimizations_release}")
 
 # for clang++ use -fuse-ld=gold to avoid LD error "File format not recognized"
 if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
@@ -33,6 +34,7 @@ endif()
 find_package(Eigen3 REQUIRED)
 include_directories(${EIGEN3_INCLUDE_DIR})
 
+# For plotting with matplotlib
 find_package(PythonLibs 3 REQUIRED)
 include_directories(${PYTHON_INCLUDE_DIRS})
 
