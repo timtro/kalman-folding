@@ -43,9 +43,10 @@ TEST_CASE("") {
   constexpr double dt = 0.1;
   constexpr double duration = 57.5;
   constexpr size_t numsamples = duration / dt;
-  constexpr double hInit = 600000; // ft
+  constexpr double hInit = 400'000; // ft
   constexpr double vInit = -6000;  // ft / sec
   constexpr double g = 32.174;     // ft / sec^2
+  constexpr double accelInit = -g;     // ft / sec^2
 
   using SampleDataSet = std::array<std::pair<double, double>, numsamples>;
   //                       x         P
@@ -61,7 +62,7 @@ TEST_CASE("") {
     SampleDataSet result;
     for (unsigned k = 0; k < numsamples; ++k) {
       auto t = k * dt;
-      result[k] = {t, hInit + vInit * t - .5 * g * t * t};
+      result[k] = {t, hInit + vInit * t + .5 * accelInit * t * t};
     }
     return result;
   }();
@@ -79,22 +80,38 @@ TEST_CASE("") {
     };
   };
 
-  const Matrix1d Zeta{0};
+  // Ζ (Zeta) -- Measurement noise:
+  const Matrix1d Zeta{100}; 
+
+  // P0 -- Starting covariance for x
   const auto P0 = Matrix2d::Identity() * 9999999999999;
+
+  // Φ (Phi) -- State transition matrix (AKA propagator matrix, AKA fundamental
+  // matrix).
   const Matrix2d Phi = [dt]() {
     Matrix2d m;
     m << 1.f, dt, 0.f, 1.f;
     return m;
   }();
+
+  // Propagator for the control input's contribution to the IVP:
+  //   x[k+1] = Φ x[k] + Γ u[k]
+  const Vector2d Gamma(dt * dt / 2, dt);
+
+  // Ξ (Xi) --  
   const Matrix2d Xi = [dt]() {
     Matrix2d m;
     m << dt * dt * dt / 3, dt * dt / 2, dt * dt / 2, dt;
     m *= 100;
     return m;
   }();
-  const Vector2d Gamma(dt * dt / 2, dt);
+
+  // A -- The output matrix. This one selects position from the state vector:
+  //     z = A x = [ 1  0 ] [ h dh/dt ]^T
+  const RowVector2d A(1, 0);
+
+  // Control input, gravity's pull.
   const Matrix1d u(-g);
-  const RowVector2d A(0.f, 1.f);
 
   auto kalman_fold = [Xi, Phi, Gamma, u, A](auto f, auto seed,
                                             SampleDataSet data) {
@@ -113,7 +130,7 @@ TEST_CASE("") {
     return plotdata;
   };
 
-  const auto [time, trueHeight, hs, Ps] =
+  auto [time, trueHeight, hs, Ps] =
       kalman_fold(kalman_static(Zeta), State{{0, 0}, P0}, trueData);
   plt::plot(time, trueHeight);
   plt::plot(time, hs);
