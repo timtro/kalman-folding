@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <array>
 #include <catch/catch.hpp>
+#include <cmath>
 #include <iostream>
 #include <numeric>
 #include <random>
@@ -47,6 +48,7 @@ constexpr double vInit = -6000;   // ft / sec
 constexpr double accelInit = -g;  // ft / sec^2
 
 constexpr double radarNoiseSigma = 1E3;
+constexpr double radarNoiseVariance = radarNoiseSigma * radarNoiseSigma;
 std::mt19937 rndEngine(seed);
 std::normal_distribution<> gaussDist{0, radarNoiseSigma};
 
@@ -83,6 +85,21 @@ using Observation =
 // generally true. You'll see that we implement our own fold to avoid bulding
 // a massive block of data with repeated content.
 
+// The Kalman fold function. When folded over a recursive structure containing
+// measurements, one obtains the series of estimated states.
+auto kalman = [](Matrix_bxb Z) {
+  return [&Z](Estimate s, Observation o) -> Estimate {
+    // with…
+    const auto [x, P] = s;
+    const auto [Xi, Phi, Gamma, u, A, z] = o;
+    const auto x2 = Phi * x + Gamma * u;
+    const auto P2 = Xi + Phi * P * Phi.transpose();
+    const auto D = Z + A * P2 * A.transpose();
+    const auto K = P2 * A.transpose() * D.inverse();
+    return {x2 + K * (z - A * x2), P2 - K * D * K.transpose()};
+  };
+};
+
 TEST_CASE("") {
 
   const StateTimeSeries trueData = []() {
@@ -105,23 +122,12 @@ TEST_CASE("") {
     return result;
   }();
 
-  // The Kalman fold function. When folded over a recursive structure containing
-  // measurements, one obtains the series of estimated states.
-  auto kalman = [](Matrix_bxb Z) {
-    return [&Z](Estimate s, Observation o) -> Estimate {
-      // with…
-      const auto [x, P] = s;
-      const auto [Xi, Phi, Gamma, u, A, z] = o;
-      const auto x2 = Phi * x + Gamma * u;
-      const auto P2 = Xi + Phi * P * Phi.transpose();
-      const auto D = Z + A * P2 * A.transpose();
-      const auto K = P2 * A.transpose() * D.inverse();
-      return {x2 + K * (z - A * x2), P2 - K * D * K.transpose()};
-    };
-  };
-
   // Ζ (Zeta) -- Measurement noise:
-  const Matrix_bxb Zeta{radarNoiseSigma};
+  const Matrix_bxb Zeta = []() {
+    Matrix_bxb mat;
+    mat << radarNoiseVariance;
+    return mat;
+  }();
 
   // P0 -- Starting covariance for x
   const auto P0 = Matrix_nxn::Identity() * 9999999999999;
@@ -170,12 +176,13 @@ TEST_CASE("") {
     std::vector<double> trueHeight;
     std::vector<double> trueSpeed;
     std::vector<double> measuredHeight;
+    std::vector<double> measuredHeightResidual;
     std::vector<double> estimatedHeight;
     std::vector<double> estimatedSpeed;
-    std::vector<Matrix_nxn> estimationCovariance;
     std::vector<double> estimatedHeightResidual;
-    std::vector<double> measuredHeightResidual;
     std::vector<double> estimatedSpeedResidual;
+    std::vector<double> estimatedHeightVariance;
+    std::vector<double> estimatedSpeedVariance;
   };
 
   auto kalman_fold = [Xi, Phi, Gamma, u, A,
@@ -184,31 +191,45 @@ TEST_CASE("") {
     SummarySeries results;
     static_assert(trueData.size() == data.size());
     for (size_t k = 0; k < data.size(); ++k) {
+      // Packing the input data
       auto datum = data[k];
       auto truth = trueData[k];
       Observation obs = {Xi, Phi, Gamma, u, A, Measurement{datum.second}};
+
+      // The only line of the function that does anything:
       accumulator = f(accumulator, obs);
-      // Packing up the data:
+
+      // Packing up the data for export:
       results.time.push_back(datum.first);
       results.trueHeight.push_back(truth.second(0));
       results.trueSpeed.push_back(truth.second(1));
       results.measuredHeight.push_back(datum.second(0));
       results.estimatedHeight.push_back(accumulator.first(0));
       results.estimatedSpeed.push_back(accumulator.first(1));
-      results.estimationCovariance.push_back(accumulator.second);
       results.estimatedHeightResidual.push_back(truth.second(0) -
                                                 accumulator.first(0));
       results.measuredHeightResidual.push_back(truth.second(0) -
                                                datum.second(0));
       results.estimatedSpeedResidual.push_back(truth.second(1) -
                                                accumulator.first(1));
+      results.estimatedHeightVariance.push_back(
+          std::sqrt(accumulator.second(0, 0)));
+      results.estimatedSpeedVariance.push_back(
+          std::sqrt(accumulator.second(1, 1)));
     }
     return results;
   };
 
+  auto neg = [](std::vector<double> xs) -> std::vector<double> {
+    std::transform(begin(xs), end(xs), begin(xs), std::negate<double>());
+    return xs;
+  };
+
   auto filteredResult =
       kalman_fold(kalman(Zeta), Estimate{{0, 0}, P0}, measuredData);
-  plt::plot(filteredResult.time, filteredResult.measuredHeightResidual);
   plt::plot(filteredResult.time, filteredResult.estimatedHeightResidual);
+  plt::plot(filteredResult.time, filteredResult.estimatedHeightVariance, "r--");
+  plt::plot(filteredResult.time, neg(filteredResult.estimatedHeightVariance),
+            "r--");
   plt::show();
 }
