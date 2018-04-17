@@ -4,6 +4,7 @@
 #include <catch/catch.hpp>
 #include <iostream>
 #include <numeric>
+#include <random>
 #include <tuple>
 #include <type_traits>
 #include <vector>
@@ -12,10 +13,6 @@
 namespace plt = matplotlibcpp;
 
 using Eigen::Matrix;
-using Eigen::Matrix2d;
-using Eigen::RowVector2d;
-using Eigen::Vector2d;
-using Matrix1d = Eigen::Matrix<double, 1, 1>;
 
 /* Preludes:
  * In [1], Beckman introduces the static Kalman filter in a series of
@@ -39,36 +36,79 @@ using Matrix1d = Eigen::Matrix<double, 1, 1>;
  *     Approach. 4th Ed. Ch 4.
  */
 
+std::seed_seq seed{1, 2, 3, 4, 5};
+
+constexpr double g = 32.174; // ft / sec^2
+constexpr double dt = 0.1;
+constexpr double duration = 57.5;
+constexpr size_t numsamples = duration / dt;
+constexpr double hInit = 400'000; // ft
+constexpr double vInit = -6000;   // ft / sec
+constexpr double accelInit = -g;  // ft / sec^2
+
+constexpr double radarNoiseSigma = 1E3;
+std::mt19937 rndEngine(seed);
+std::normal_distribution<> gaussDist{0, radarNoiseSigma};
+
+constexpr size_t n = 2; // number of state variables, h and dhdt.
+constexpr size_t b = 1; // number of output variables, just x
+constexpr size_t m = 1; // number of control variables, just acceleration.
+
+using State = Matrix<double, n, 1>;
+using Measurement = Matrix<double, b, 1>;
+using Control = Matrix<double, m, 1>;
+using RowState = Matrix<double, 1, n>;
+using Matrix_nxn = Matrix<double, n, n>;
+using Matrix_bxn = Matrix<double, b, n>;
+using Matrix_bxb = Matrix<double, b, b>;
+using Matrix_nxm = Matrix<double, n, m>;
+
+using StateTimeSeries = std::array<std::pair<double, State>, numsamples>;
+//                                           ^time
+
+using MeasurementTimeSeries =
+    std::array<std::pair<double, Measurement>, numsamples>;
+//                       ^time
+
+using Estimate = std::pair<State, Matrix_nxn>;
+//                         ^x   , ^P
+
+using Observation =
+    std::tuple<Matrix_nxn, Matrix_nxn, Matrix_nxm, Control, RowState,
+               // ^Xi       , ^Phi      , ^Gamma    , ^u     , ^A
+               Measurement>;
+//             ^z
+
+// In this example, most of the `Observation` is constant, but that's not
+// generally true. You'll see that we implement our own fold to avoid bulding
+// a massive block of data with repeated content.
+
 TEST_CASE("") {
-  constexpr double dt = 0.1;
-  constexpr double duration = 57.5;
-  constexpr size_t numsamples = duration / dt;
-  constexpr double hInit = 400'000; // ft
-  constexpr double vInit = -6000;  // ft / sec
-  constexpr double g = 32.174;     // ft / sec^2
-  constexpr double accelInit = -g;     // ft / sec^2
 
-  using SampleDataSet = std::array<std::pair<double, double>, numsamples>;
-  //                       x         P
-  using State = std::pair<Vector2d, Matrix2d>;
-  using Observation =
-      //         Xi        Phi       Gamma     u         A            z
-      std::tuple<Matrix2d, Matrix2d, Vector2d, Matrix1d, RowVector2d, Matrix1d>;
-  // In this example, most of the `Observation` is constant, but that's not
-  // generally true. You'll see that we implement our own fold to avoid bulding
-  // a massive block of data with repeated content.
-
-  const SampleDataSet trueData = []() {
-    SampleDataSet result;
+  const StateTimeSeries trueData = []() {
+    StateTimeSeries result;
     for (unsigned k = 0; k < numsamples; ++k) {
       auto t = k * dt;
-      result[k] = {t, hInit + vInit * t + .5 * accelInit * t * t};
+      State next;
+      next << hInit + vInit * t + .5 * accelInit * t * t, vInit + accelInit * t;
+      result[k] = {t, next};
     }
     return result;
   }();
 
-  auto kalman_static = [](Matrix1d Z) {
-    return [&Z](State s, Observation o) -> State {
+  const MeasurementTimeSeries measuredData = [&trueData]() {
+    MeasurementTimeSeries result;
+    for (unsigned k = 0; k < trueData.size(); ++k) {
+      result[k].first = trueData[k].first; // time
+      result[k].second(0) = trueData[k].second(0) + gaussDist(rndEngine);
+    }
+    return result;
+  }();
+
+  // The Kalman fold function. When folded over a recursive structure containing
+  // measurements, one obtains the series of estimated states.
+  auto kalman = [](Matrix_bxb Z) {
+    return [&Z](Estimate s, Observation o) -> Estimate {
       // with…
       const auto [x, P] = s;
       const auto [Xi, Phi, Gamma, u, A, z] = o;
@@ -81,58 +121,94 @@ TEST_CASE("") {
   };
 
   // Ζ (Zeta) -- Measurement noise:
-  const Matrix1d Zeta{100}; 
+  const Matrix_bxb Zeta{radarNoiseSigma};
 
   // P0 -- Starting covariance for x
-  const auto P0 = Matrix2d::Identity() * 9999999999999;
+  const auto P0 = Matrix_nxn::Identity() * 9999999999999;
 
-  // Φ (Phi) -- State transition matrix (AKA propagator matrix, AKA fundamental
-  // matrix).
-  const Matrix2d Phi = [dt]() {
-    Matrix2d m;
-    m << 1.f, dt, 0.f, 1.f;
-    return m;
+  // Φ (Phi) -- Estimate transition matrix (AKA propagator matrix, AKA
+  // fundamental matrix).
+  const Matrix_nxn Phi = []() {
+    Matrix_nxn mat;
+    mat << 1.f, dt, 0.f, 1.f;
+    return mat;
   }();
 
   // Propagator for the control input's contribution to the IVP:
   //   x[k+1] = Φ x[k] + Γ u[k]
-  const Vector2d Gamma(dt * dt / 2, dt);
+  const Matrix_nxm Gamma = []() {
+    Matrix_nxm mat;
+    mat << dt * dt / 2, dt;
+    return mat;
+  }();
 
-  // Ξ (Xi) --  
-  const Matrix2d Xi = [dt]() {
-    Matrix2d m;
-    m << dt * dt * dt / 3, dt * dt / 2, dt * dt / 2, dt;
-    m *= 100;
-    return m;
+  // Ξ (Xi) --
+  const Matrix_nxn Xi = []() {
+    Matrix_nxn mat;
+    mat << dt * dt * dt / 3, dt * dt / 2, dt * dt / 2, dt;
+    mat *= 100;
+    return mat;
   }();
 
   // A -- The output matrix. This one selects position from the state vector:
   //     z = A x = [ 1  0 ] [ h dh/dt ]^T
-  const RowVector2d A(1, 0);
+  const RowState A = []() {
+    RowState mat;
+    mat << 1, 0;
+    return mat;
+  }();
 
   // Control input, gravity's pull.
-  const Matrix1d u(-g);
+  const Control u = []() {
+    Control mat;
+    mat << -g;
+    return mat;
+  }();
 
-  auto kalman_fold = [Xi, Phi, Gamma, u, A](auto f, auto seed,
-                                            SampleDataSet data) {
-    auto accumulator = seed;
-    std::tuple<std::vector<double>, std::vector<double>, std::vector<double>,
-               std::vector<Matrix2d>>
-        plotdata;
-    for (auto datum : data) {
-      Observation obs = {Xi, Phi, Gamma, u, A, Matrix1d{datum.second}};
-      accumulator = f(accumulator, obs);
-      std::get<0>(plotdata).push_back(datum.first);
-      std::get<1>(plotdata).push_back(datum.second);
-      std::get<2>(plotdata).push_back(accumulator.first(0));
-      std::get<3>(plotdata).push_back(accumulator.second);
-    }
-    return plotdata;
+  struct SummarySeries {
+    std::vector<double> time;
+    std::vector<double> trueHeight;
+    std::vector<double> trueSpeed;
+    std::vector<double> measuredHeight;
+    std::vector<double> estimatedHeight;
+    std::vector<double> estimatedSpeed;
+    std::vector<Matrix_nxn> estimationCovariance;
+    std::vector<double> estimatedHeightResidual;
+    std::vector<double> measuredHeightResidual;
+    std::vector<double> estimatedSpeedResidual;
   };
 
-  auto [time, trueHeight, hs, Ps] =
-      kalman_fold(kalman_static(Zeta), State{{0, 0}, P0}, trueData);
-  plt::plot(time, trueHeight);
-  plt::plot(time, hs);
+  auto kalman_fold = [Xi, Phi, Gamma, u, A,
+                      trueData](auto f, auto seed, MeasurementTimeSeries data) {
+    auto accumulator = seed;
+    SummarySeries results;
+    static_assert(trueData.size() == data.size());
+    for (size_t k = 0; k < data.size(); ++k) {
+      auto datum = data[k];
+      auto truth = trueData[k];
+      Observation obs = {Xi, Phi, Gamma, u, A, Measurement{datum.second}};
+      accumulator = f(accumulator, obs);
+      // Packing up the data:
+      results.time.push_back(datum.first);
+      results.trueHeight.push_back(truth.second(0));
+      results.trueSpeed.push_back(truth.second(1));
+      results.measuredHeight.push_back(datum.second(0));
+      results.estimatedHeight.push_back(accumulator.first(0));
+      results.estimatedSpeed.push_back(accumulator.first(1));
+      results.estimationCovariance.push_back(accumulator.second);
+      results.estimatedHeightResidual.push_back(truth.second(0) -
+                                                accumulator.first(0));
+      results.measuredHeightResidual.push_back(truth.second(0) -
+                                               datum.second(0));
+      results.estimatedSpeedResidual.push_back(truth.second(1) -
+                                               accumulator.first(1));
+    }
+    return results;
+  };
+
+  auto filteredResult =
+      kalman_fold(kalman(Zeta), Estimate{{0, 0}, P0}, measuredData);
+  plt::plot(filteredResult.time, filteredResult.measuredHeightResidual);
+  plt::plot(filteredResult.time, filteredResult.estimatedHeightResidual);
   plt::show();
 }
