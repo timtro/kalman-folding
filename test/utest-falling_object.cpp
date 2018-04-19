@@ -10,6 +10,8 @@
 #include <type_traits>
 #include <vector>
 
+#include "../include/gnuplot-iostream.h"
+
 using Eigen::Matrix;
 
 /* Preludes:
@@ -59,22 +61,21 @@ using Matrix_nxn = Matrix<double, n, n>;
 using Matrix_bxn = Matrix<double, b, n>;
 using Matrix_bxb = Matrix<double, b, b>;
 using Matrix_nxm = Matrix<double, n, m>;
-
 using StateTimeSeries = std::array<std::pair<double, State>, numsamples>;
 //                                           ^time
-
 using MeasurementTimeSeries =
     std::array<std::pair<double, Measurement>, numsamples>;
 //                       ^time
-
 using Estimate = std::pair<State, Matrix_nxn>;
 //                         ^x   , ^P
-
 using Observation =
     std::tuple<Matrix_nxn, Matrix_nxn, Matrix_nxm, Control, RowState,
                // ^Xi       , ^Phi      , ^Gamma    , ^u     , ^A
                Measurement>;
 //             ^z
+// The observation includes the model. Since the model and control input is
+// constant for this example, you'll see that the kalman_fold function takes the
+// measurement from a list and packs it in the tuple with constant matrices.
 
 const StateTimeSeries trueData = []() {
   StateTimeSeries result;
@@ -97,8 +98,8 @@ const Matrix_bxb Zeta = []() {
 // P0 -- Starting covariance for x
 const auto P0 = Matrix_nxn::Identity() * 9999999999999;
 
-// Φ (Phi) -- Estimate transition matrix (AKA propagator matrix, AKA
-// fundamental matrix).
+// Φ (Phi) -- State transition matrix (AKA propagator matrix
+// and fundamental matrix).
 const Matrix_nxn Phi = []() {
   Matrix_nxn mat;
   mat << 1.f, dt, 0.f, 1.f;
@@ -113,7 +114,8 @@ const Matrix_nxm Gamma = []() {
   return mat;
 }();
 
-// Ξ (Xi) --
+// Ξ (Xi) -- Not sure what to call this, but it's part of the evolution of the
+// estimate covariance.
 const Matrix_nxn Xi = []() {
   Matrix_nxn mat;
   mat << dt * dt * dt / 3, dt * dt / 2, dt * dt / 2, dt;
@@ -147,6 +149,7 @@ auto kalman = [](Matrix_bxb Z) {
     const auto P2 = Xi + Phi * P * Phi.transpose();
     const auto D = Z + A * P2 * A.transpose();
     const auto K = P2 * A.transpose() * D.inverse();
+
     return {x2 + K * (z - A * x2), P2 - K * D * K.transpose()};
   };
 };
@@ -154,6 +157,7 @@ auto kalman = [](Matrix_bxb Z) {
 auto kalman_fold = [](auto f, auto seed, MeasurementTimeSeries data) {
   auto accumulator = seed;
   std::vector<decltype(accumulator)> allAccumulated;
+  allAccumulated.reserve(data.size());
   static_assert(trueData.size() == data.size());
   for (const auto &datum : data) {
     Observation obs = {Xi, Phi, Gamma, u, A, Measurement{datum.second}};
@@ -178,4 +182,20 @@ TEST_CASE("") {
   }();
 
   auto final = kalman_fold(kalman(Zeta), Estimate{{0, 0}, P0}, measuredData);
+
+  Gnuplot gp;
+  gp << "set yr [-1100:1100]\n";
+  gp << "plot '-' u 1:2 w l,";
+  gp << "     '-' u 1:(sqrt($3)) w l lt 2,";
+  gp << "     '-' u 1:(-sqrt($3)) w l lt 2\n";
+  std::vector<std::tuple<double, double, double>> plotdata;
+  for (size_t k = 0; k < trueData.size(); ++k) {
+    plotdata.push_back({trueData[k].first,
+                        trueData[k].second(0) - final[k].first(0),
+                        final[k].second(0, 0)});
+  }
+
+  gp.send1d(plotdata);
+  gp.send1d(plotdata);
+  gp.send1d(plotdata);
 }
