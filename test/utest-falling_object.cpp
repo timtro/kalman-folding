@@ -10,9 +10,6 @@
 #include <type_traits>
 #include <vector>
 
-#include "../include/matplotlibcpp.h"
-namespace plt = matplotlibcpp;
-
 using Eigen::Matrix;
 
 /* Preludes:
@@ -39,18 +36,16 @@ using Eigen::Matrix;
 
 std::seed_seq seed{1, 2, 3, 4, 5};
 
-constexpr double g = 32.174; // ft / sec^2
-constexpr double dt = 0.1;
-constexpr double duration = 57.5;
+constexpr double g = 32.174;      // ft / sec^2
+constexpr double dt = 0.1;        // sec
+constexpr double duration = 57.5; // sec
 constexpr size_t numsamples = duration / dt;
 constexpr double hInit = 400'000; // ft
 constexpr double vInit = -6000;   // ft / sec
 constexpr double accelInit = -g;  // ft / sec^2
 
-constexpr double radarNoiseSigma = 1E3;
-constexpr double radarNoiseVariance = radarNoiseSigma * radarNoiseSigma;
-std::mt19937 rndEngine(seed);
-std::normal_distribution<> gaussDist{0, radarNoiseSigma};
+constexpr double radarNoiseSigma = 1E3;                                  // ft
+constexpr double radarNoiseVariance = radarNoiseSigma * radarNoiseSigma; // ft^2
 
 constexpr size_t n = 2; // number of state variables, h and dhdt.
 constexpr size_t b = 1; // number of output variables, just x
@@ -81,9 +76,65 @@ using Observation =
                Measurement>;
 //             ^z
 
-// In this example, most of the `Observation` is constant, but that's not
-// generally true. You'll see that we implement our own fold to avoid bulding
-// a massive block of data with repeated content.
+const StateTimeSeries trueData = []() {
+  StateTimeSeries result;
+  for (unsigned k = 0; k < numsamples; ++k) {
+    auto t = k * dt;
+    State next;
+    next << hInit + vInit * t + .5 * accelInit * t * t, vInit + accelInit * t;
+    result[k] = {t, next};
+  }
+  return result;
+}();
+
+// Ζ (Zeta) -- Measurement noise:
+const Matrix_bxb Zeta = []() {
+  Matrix_bxb mat;
+  mat << radarNoiseVariance;
+  return mat;
+}();
+
+// P0 -- Starting covariance for x
+const auto P0 = Matrix_nxn::Identity() * 9999999999999;
+
+// Φ (Phi) -- Estimate transition matrix (AKA propagator matrix, AKA
+// fundamental matrix).
+const Matrix_nxn Phi = []() {
+  Matrix_nxn mat;
+  mat << 1.f, dt, 0.f, 1.f;
+  return mat;
+}();
+
+// Propagator for the control input's contribution to the IVP:
+//   x[k+1] = Φ x[k] + Γ u[k]
+const Matrix_nxm Gamma = []() {
+  Matrix_nxm mat;
+  mat << dt * dt / 2, dt;
+  return mat;
+}();
+
+// Ξ (Xi) --
+const Matrix_nxn Xi = []() {
+  Matrix_nxn mat;
+  mat << dt * dt * dt / 3, dt * dt / 2, dt * dt / 2, dt;
+  mat *= 100;
+  return mat;
+}();
+
+// A -- The output matrix. This one selects position from the state vector:
+//     z = A x = [ 1  0 ] [ h dh/dt ]^T
+const RowState A = []() {
+  RowState mat;
+  mat << 1, 0;
+  return mat;
+}();
+
+// Control input, gravity's pull.
+const Control u = []() {
+  Control mat;
+  mat << -g;
+  return mat;
+}();
 
 // The Kalman fold function. When folded over a recursive structure containing
 // measurements, one obtains the series of estimated states.
@@ -100,20 +151,24 @@ auto kalman = [](Matrix_bxb Z) {
   };
 };
 
+auto kalman_fold = [](auto f, auto seed, MeasurementTimeSeries data) {
+  auto accumulator = seed;
+  std::vector<decltype(accumulator)> allAccumulated;
+  static_assert(trueData.size() == data.size());
+  for (const auto &datum : data) {
+    Observation obs = {Xi, Phi, Gamma, u, A, Measurement{datum.second}};
+    accumulator = f(accumulator, obs);
+    allAccumulated.push_back(accumulator);
+  };
+  return allAccumulated;
+};
+
 TEST_CASE("") {
 
-  const StateTimeSeries trueData = []() {
-    StateTimeSeries result;
-    for (unsigned k = 0; k < numsamples; ++k) {
-      auto t = k * dt;
-      State next;
-      next << hInit + vInit * t + .5 * accelInit * t * t, vInit + accelInit * t;
-      result[k] = {t, next};
-    }
-    return result;
-  }();
+  std::mt19937 rndEngine(seed);
+  std::normal_distribution<> gaussDist{0, radarNoiseSigma};
 
-  const MeasurementTimeSeries measuredData = [&trueData]() {
+  const MeasurementTimeSeries measuredData = [&gaussDist, &rndEngine]() {
     MeasurementTimeSeries result;
     for (unsigned k = 0; k < trueData.size(); ++k) {
       result[k].first = trueData[k].first; // time
@@ -122,114 +177,5 @@ TEST_CASE("") {
     return result;
   }();
 
-  // Ζ (Zeta) -- Measurement noise:
-  const Matrix_bxb Zeta = []() {
-    Matrix_bxb mat;
-    mat << radarNoiseVariance;
-    return mat;
-  }();
-
-  // P0 -- Starting covariance for x
-  const auto P0 = Matrix_nxn::Identity() * 9999999999999;
-
-  // Φ (Phi) -- Estimate transition matrix (AKA propagator matrix, AKA
-  // fundamental matrix).
-  const Matrix_nxn Phi = []() {
-    Matrix_nxn mat;
-    mat << 1.f, dt, 0.f, 1.f;
-    return mat;
-  }();
-
-  // Propagator for the control input's contribution to the IVP:
-  //   x[k+1] = Φ x[k] + Γ u[k]
-  const Matrix_nxm Gamma = []() {
-    Matrix_nxm mat;
-    mat << dt * dt / 2, dt;
-    return mat;
-  }();
-
-  // Ξ (Xi) --
-  const Matrix_nxn Xi = []() {
-    Matrix_nxn mat;
-    mat << dt * dt * dt / 3, dt * dt / 2, dt * dt / 2, dt;
-    mat *= 100;
-    return mat;
-  }();
-
-  // A -- The output matrix. This one selects position from the state vector:
-  //     z = A x = [ 1  0 ] [ h dh/dt ]^T
-  const RowState A = []() {
-    RowState mat;
-    mat << 1, 0;
-    return mat;
-  }();
-
-  // Control input, gravity's pull.
-  const Control u = []() {
-    Control mat;
-    mat << -g;
-    return mat;
-  }();
-
-  struct SummarySeries {
-    std::vector<double> time;
-    std::vector<double> trueHeight;
-    std::vector<double> trueSpeed;
-    std::vector<double> measuredHeight;
-    std::vector<double> measuredHeightResidual;
-    std::vector<double> estimatedHeight;
-    std::vector<double> estimatedSpeed;
-    std::vector<double> estimatedHeightResidual;
-    std::vector<double> estimatedSpeedResidual;
-    std::vector<double> estimatedHeightVariance;
-    std::vector<double> estimatedSpeedVariance;
-  };
-
-  auto kalman_fold = [Xi, Phi, Gamma, u, A,
-                      trueData](auto f, auto seed, MeasurementTimeSeries data) {
-    auto accumulator = seed;
-    SummarySeries results;
-    static_assert(trueData.size() == data.size());
-    for (size_t k = 0; k < data.size(); ++k) {
-      // Packing the input data
-      auto datum = data[k];
-      auto truth = trueData[k];
-      Observation obs = {Xi, Phi, Gamma, u, A, Measurement{datum.second}};
-
-      // The only line of the function that does anything:
-      accumulator = f(accumulator, obs);
-
-      // Packing up the data for export:
-      results.time.push_back(datum.first);
-      results.trueHeight.push_back(truth.second(0));
-      results.trueSpeed.push_back(truth.second(1));
-      results.measuredHeight.push_back(datum.second(0));
-      results.estimatedHeight.push_back(accumulator.first(0));
-      results.estimatedSpeed.push_back(accumulator.first(1));
-      results.estimatedHeightResidual.push_back(truth.second(0) -
-                                                accumulator.first(0));
-      results.measuredHeightResidual.push_back(truth.second(0) -
-                                               datum.second(0));
-      results.estimatedSpeedResidual.push_back(truth.second(1) -
-                                               accumulator.first(1));
-      results.estimatedHeightVariance.push_back(
-          std::sqrt(accumulator.second(0, 0)));
-      results.estimatedSpeedVariance.push_back(
-          std::sqrt(accumulator.second(1, 1)));
-    }
-    return results;
-  };
-
-  auto neg = [](std::vector<double> xs) -> std::vector<double> {
-    std::transform(begin(xs), end(xs), begin(xs), std::negate<double>());
-    return xs;
-  };
-
-  auto filteredResult =
-      kalman_fold(kalman(Zeta), Estimate{{0, 0}, P0}, measuredData);
-  plt::plot(filteredResult.time, filteredResult.estimatedHeightResidual);
-  plt::plot(filteredResult.time, filteredResult.estimatedHeightVariance, "r--");
-  plt::plot(filteredResult.time, neg(filteredResult.estimatedHeightVariance),
-            "r--");
-  plt::show();
+  auto final = kalman_fold(kalman(Zeta), Estimate{{0, 0}, P0}, measuredData);
 }

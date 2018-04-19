@@ -34,11 +34,7 @@ endif()
 find_package(Eigen3 REQUIRED)
 include_directories(${EIGEN3_INCLUDE_DIR})
 
-# For plotting with matplotlib
-find_package(PythonLibs 3 REQUIRED)
-include_directories(${PYTHON_INCLUDE_DIRS})
-
-  enable_testing()
+enable_testing()
 add_subdirectory (test)
 
 if( EXISTS "${CMAKE_CURRENT_BINARY_DIR}/compile_commands.json" )

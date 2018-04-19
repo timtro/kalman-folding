@@ -12,6 +12,5 @@ set(testname utest-linear_least_squares)
 
 set(testname utest-falling_object)
     add_executable (${testname} ${testname}.cpp)
-    target_link_libraries (${testname} CATCH ${EIGEN3_LIBRARIES}
-      ${PYTHON_LIBRARIES})
+    target_link_libraries (${testname} CATCH ${EIGEN3_LIBRARIES})
     create_test(${testname})
