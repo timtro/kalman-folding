@@ -1,3 +1,5 @@
+#include "../include/gnuplot-iostream.h"
+#include "range/v3/all.hpp"
 #include <Eigen/Dense>
 #include <algorithm>
 #include <array>
@@ -10,9 +12,8 @@
 #include <type_traits>
 #include <vector>
 
-#include "../include/gnuplot-iostream.h"
-
 using Eigen::Matrix;
+using namespace ranges;
 
 /* Preludes:
  * In [1], Beckman introduces the static Kalman filter in a series of
@@ -167,7 +168,8 @@ auto kalman_fold = [](auto f, auto seed, MeasurementTimeSeries data) {
   return allAccumulated;
 };
 
-TEST_CASE("") {
+TEST_CASE("Tracking a falling object with a (simulated) noisy radar, the "
+          "Kalman filtered signal should...") {
 
   std::mt19937 rndEngine(seed);
   std::normal_distribution<> gaussDist{0, radarNoiseSigma};
@@ -181,21 +183,50 @@ TEST_CASE("") {
     return result;
   }();
 
-  auto final = kalman_fold(kalman(Zeta), Estimate{{0, 0}, P0}, measuredData);
+  auto estimationSignal =
+      kalman_fold(kalman(Zeta), Estimate{{0, 0}, P0}, measuredData);
 
-  Gnuplot gp;
-  gp << "set yr [-1100:1100]\n";
-  gp << "plot '-' u 1:2 w l,";
-  gp << "     '-' u 1:(sqrt($3)) w l lt 2,";
-  gp << "     '-' u 1:(-sqrt($3)) w l lt 2\n";
-  std::vector<std::tuple<double, double, double>> plotdata;
-  for (size_t k = 0; k < trueData.size(); ++k) {
-    plotdata.push_back({trueData[k].first,
-                        trueData[k].second(0) - final[k].first(0),
-                        final[k].second(0, 0)});
+  // clang-format off
+  auto estimationResidual = view::zip(trueData, estimationSignal)
+                          | view::transform([](const auto &truthAndEstimate) {
+                              const auto &[truth, estimate] = truthAndEstimate;
+                              State residual;
+                              residual << truth.second(0) - estimate.first(0),
+                                  truth.second(1) - estimate.first(1);
+                              return residual;
+                            });
+  // clang-format on
+
+  SECTION(
+      "... remain in the 90% confidence tube at least 90% of the time.") {
+    assert(estimationSignal.size() == estimationResidual.size());
+    auto outOfBoundsCount = accumulate(
+        view::zip(estimationSignal, estimationResidual), 0,
+        [](int counter, const auto &estimateAndResidual) {
+          const auto &[estimate, residual] = estimateAndResidual;
+          if (residual(0) * residual(0) > 1.65 * 1.65 * estimate.second(0, 0))
+            return ++counter;
+          else
+            return counter;
+        });
+    REQUIRE(outOfBoundsCount <= trueData.size() * 0.1);
   }
 
-  gp.send1d(plotdata);
-  gp.send1d(plotdata);
-  gp.send1d(plotdata);
+  // Gnuplot gp;
+  // // gp << "set term wxt\n";
+  // gp << "set yr [-1100:1100]\n";
+  // gp << "plot '-' u 1:2 w l lt 3,";
+  // gp << "     '-' u 1:(1.645*sqrt($3)) w l lc rgb '#FF0000' dt 2,";
+  // gp << "     '-' u 1:(1.645*-sqrt($3)) w l lc rgb '#FF0000' dt 2\n";
+  // std::vector<std::tuple<double, double, double>> plotdata;
+  // for (size_t k = 0; k < trueData.size(); ++k) {
+  //   plotdata.push_back({trueData[k].first,
+  //                       trueData[k].second(0) - estimationSignal[k].first(0),
+  //                       estimationSignal[k].second(0, 0)});
+  // }
+  //
+  // gp.send1d(plotdata);
+  // gp.send1d(plotdata);
+  // gp.send1d(plotdata);
+  // gp << "pause mouse key\nwhile (MOUSE_CHAR ne 'q') { pause mouse key; }\n";
 }

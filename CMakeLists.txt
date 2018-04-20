@@ -34,6 +34,9 @@ endif()
 find_package(Eigen3 REQUIRED)
 include_directories(${EIGEN3_INCLUDE_DIR})
 
+find_package(Range-V3 REQUIRED)
+include_directories(${RANGE-V3_INCLUDE_DIR})
+
 enable_testing()
 add_subdirectory (test)
 
