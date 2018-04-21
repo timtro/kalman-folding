@@ -1,4 +1,4 @@
-#include "../include/gnuplot-iostream.h"
+#include "boost/hana/functional/curry.hpp"
 #include "range/v3/all.hpp"
 #include <Eigen/Dense>
 #include <algorithm>
@@ -6,6 +6,7 @@
 #include <catch/catch.hpp>
 #include <cmath>
 #include <iostream>
+#include <limits>
 #include <numeric>
 #include <random>
 #include <tuple>
@@ -14,22 +15,25 @@
 
 using Eigen::Matrix;
 using namespace ranges;
+using boost::hana::curry;
 
 /* Preludes:
  * In [1], Beckman introduces the static Kalman filter in a series of
- * four preludes, the fourth being an implementation of a static Kalman filter.
- * (Static meaning that model states do not vary with the independent variable)
- * Those preludes are covered in `utest-linear_least_squares.cpp`.
+ * four preludes, the fourth being an implementation of a static Kalman
+ * filter. (Static meaning that model states do not vary with the
+ * independent variable) Those preludes are covered in
+ * `utest-linear_least_squares.cpp`.
  *
  * In [2], Beckman generalizes to the non-static case, where the
- * model includes a control input term in addition to the drift term. Beckman's
- * exhibition centres on a textbook example from Zarchan and Musoff [3].
+ * model includes a control input term in addition to the drift term.
+ * Beckman's exhibition centres on a textbook example from Zarchan and
+ * Musoff [3].
  *
- * This series of test cases explores Beckman's implementation. It's important
- * to keep in mind that this and previously explored implementations suffer
- * numerical stability and efficiency issues. For example, the use of
- * matrix-inversion. Better numerical hygine will be practised in another
- * iteration of the problem.
+ * This series of test cases explores Beckman's implementation. It's
+ * important to keep in mind that this and previously explored
+ * implementations suffer numerical stability and efficiency issues. For
+ * example, the use of matrix-inversion. Better numerical hygine will be
+ * practised in another iteration of the problem.
  *
  * [1] Brian Beckman, Kalman Folding-Part 1. (2016)
  * [2] Brian Beckman, Kalman Folding 2: Tracking and System Dynamics. (2016)
@@ -197,10 +201,42 @@ TEST_CASE("Tracking a falling object with a (simulated) noisy radar, the "
                             });
   // clang-format on
 
-  SECTION(
-      "... remain in the 90% confidence tube at least 90% of the time.") {
+  SECTION("... the variance of the height and speed estimates should decrease "
+          "monotonically since the measurement variance is constant.") {
+    std::pair seed{false, std::numeric_limits<double>::max()};
+
+    const auto extract_estimate_covariance_element =
+        curry<3>([](size_t j, size_t k, Estimate e) { return e.second(j, k); });
+
+    // The extracter function is used to get at whichever part of the `record`
+    // we want to check for monotonicity.
+    const auto pairwise_monotonic_dec_check = curry<3>(
+        [](const auto extractor, const auto &flagAndPrev, const auto &record) {
+          const auto &[flag, prev] = flagAndPrev;
+          return flag ? flagAndPrev
+                      : std::make_pair(prev > extractor(record),
+                                       extractor(record));
+        });
+
+    bool heightVarianceIsMonotoniclyDecreasing =
+        accumulate(estimationSignal, seed,
+                   pairwise_monotonic_dec_check(
+                       extract_estimate_covariance_element(0, 0)))
+            .first;
+
+    REQUIRE(heightVarianceIsMonotoniclyDecreasing);
+
+    bool speedVarianceIsMonotoniclyDecreasing =
+        accumulate(estimationSignal, seed,
+                   pairwise_monotonic_dec_check(
+                       extract_estimate_covariance_element(1, 1)))
+            .first;
+    REQUIRE(speedVarianceIsMonotoniclyDecreasing);
+  }
+
+  SECTION("... remain in the 90% confidence tube at least 90% of the time.") {
     assert(estimationSignal.size() == estimationResidual.size());
-    auto outOfBoundsCount = accumulate(
+    auto outOfTubeCount = accumulate(
         view::zip(estimationSignal, estimationResidual), 0,
         [](int counter, const auto &estimateAndResidual) {
           const auto &[estimate, residual] = estimateAndResidual;
@@ -209,24 +245,6 @@ TEST_CASE("Tracking a falling object with a (simulated) noisy radar, the "
           else
             return counter;
         });
-    REQUIRE(outOfBoundsCount <= trueData.size() * 0.1);
+    REQUIRE(outOfTubeCount <= trueData.size() * 0.1);
   }
-
-  // Gnuplot gp;
-  // // gp << "set term wxt\n";
-  // gp << "set yr [-1100:1100]\n";
-  // gp << "plot '-' u 1:2 w l lt 3,";
-  // gp << "     '-' u 1:(1.645*sqrt($3)) w l lc rgb '#FF0000' dt 2,";
-  // gp << "     '-' u 1:(1.645*-sqrt($3)) w l lc rgb '#FF0000' dt 2\n";
-  // std::vector<std::tuple<double, double, double>> plotdata;
-  // for (size_t k = 0; k < trueData.size(); ++k) {
-  //   plotdata.push_back({trueData[k].first,
-  //                       trueData[k].second(0) - estimationSignal[k].first(0),
-  //                       estimationSignal[k].second(0, 0)});
-  // }
-  //
-  // gp.send1d(plotdata);
-  // gp.send1d(plotdata);
-  // gp.send1d(plotdata);
-  // gp << "pause mouse key\nwhile (MOUSE_CHAR ne 'q') { pause mouse key; }\n";
 }
