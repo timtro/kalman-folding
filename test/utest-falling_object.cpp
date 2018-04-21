@@ -58,9 +58,9 @@ constexpr size_t n = 2; // number of state variables, h and dhdt.
 constexpr size_t b = 1; // number of output variables, just x
 constexpr size_t m = 1; // number of control variables, just acceleration.
 
-using State = Matrix<double, n, 1>;
-using Measurement = Matrix<double, b, 1>;
-using Control = Matrix<double, m, 1>;
+using State = Matrix<double, n, 1>;       // Contains a distance and a velocity.
+using Measurement = Matrix<double, b, 1>; // 1x1, contains just a distance.
+using Control = Matrix<double, m, 1>;     // 1x1, the acceleration.
 using RowState = Matrix<double, 1, n>;
 using Matrix_nxn = Matrix<double, n, n>;
 using Matrix_bxn = Matrix<double, b, n>;
@@ -78,9 +78,10 @@ using Observation =
                // ^Xi       , ^Phi      , ^Gamma    , ^u     , ^A
                Measurement>;
 //             ^z
-// The observation includes the model. Since the model and control input is
-// constant for this example, you'll see that the kalman_fold function takes the
-// measurement from a list and packs it in the tuple with constant matrices.
+// The observation includes the model and control. Since the model and control
+// input is constant for this example, you'll see that the kalman_fold function
+// takes the measurement from a list and packs it in the tuple with constant
+// matrices.
 
 const StateTimeSeries trueData = []() {
   StateTimeSeries result;
@@ -143,9 +144,11 @@ const Control u = []() {
   return mat;
 }();
 
-// The Kalman fold function. When folded over a recursive structure containing
-// measurements, one obtains the series of estimated states.
-auto kalman = [](Matrix_bxb Z) {
+// The foldable Kalman function. When folded over a recursive structure
+// containing `Measurement`s, one obtains the series of estimated states. (That
+// assumes you get a series out of the fold. A traditional fold will yield only
+// it's most up to date rockoning at the end of the fold)
+constexpr auto kalman = [](Matrix_bxb Z) {
   return [&Z](Estimate s, Observation o) -> Estimate {
     // with…
     const auto [x, P] = s;
@@ -159,26 +162,30 @@ auto kalman = [](Matrix_bxb Z) {
   };
 };
 
-auto kalman_fold = [](auto f, auto seed, MeasurementTimeSeries data) {
-  auto accumulator = seed;
-  std::vector<decltype(accumulator)> allAccumulated;
-  allAccumulated.reserve(data.size());
+constexpr auto kalman_fold = [](auto f, auto x0, MeasurementTimeSeries data) {
+  auto accumulator = x0;
+  std::vector<decltype(accumulator)> xs;
+  xs.reserve(data.size());
+
   static_assert(trueData.size() == data.size());
+
   for (const auto &datum : data) {
     Observation obs = {Xi, Phi, Gamma, u, A, Measurement{datum.second}};
     accumulator = f(accumulator, obs);
-    allAccumulated.push_back(accumulator);
+    xs.push_back(accumulator);
   };
-  return allAccumulated;
+
+  return xs;
 };
 
 TEST_CASE("Tracking a falling object with a (simulated) noisy radar, the "
-          "Kalman filtered signal should...") {
+          "Kalman filtered signal ...") {
 
   std::mt19937 rndEngine(seed);
   std::normal_distribution<> gaussDist{0, radarNoiseSigma};
 
-  const MeasurementTimeSeries measuredData = [&gaussDist, &rndEngine]() {
+  const auto measuredData = [&gaussDist,
+                             &rndEngine]() -> MeasurementTimeSeries {
     MeasurementTimeSeries result;
     for (unsigned k = 0; k < trueData.size(); ++k) {
       result[k].first = trueData[k].first; // time
@@ -187,64 +194,83 @@ TEST_CASE("Tracking a falling object with a (simulated) noisy radar, the "
     return result;
   }();
 
-  auto estimationSignal =
+  const auto estimationSignal =
       kalman_fold(kalman(Zeta), Estimate{{0, 0}, P0}, measuredData);
 
   // clang-format off
-  auto estimationResidual = view::zip(trueData, estimationSignal)
-                          | view::transform([](const auto &truthAndEstimate) {
-                              const auto &[truth, estimate] = truthAndEstimate;
-                              State residual;
-                              residual << truth.second(0) - estimate.first(0),
-                                  truth.second(1) - estimate.first(1);
-                              return residual;
-                            });
+  const auto estimationResidual =
+      view::zip(trueData, estimationSignal) 
+      | view::transform([](const auto &truthAndEstimate) {
+        // truth : (time, State)
+        // estimate : (State, Matrix_nxn) = (State, P)
+        const auto &[truth, estimate] = truthAndEstimate;
+        State residual;
+
+        residual << truth.second(0) - estimate.first(0),
+            truth.second(1) - estimate.first(1);
+
+        return residual;
+      });
   // clang-format on
 
-  SECTION("... the variance of the height and speed estimates should decrease "
-          "monotonically since the measurement variance is constant.") {
-    std::pair seed{false, std::numeric_limits<double>::max()};
+  SECTION("...  covariance should decrease monotonically since the measurement "
+          "variance is constant.") {
 
-    const auto extract_estimate_covariance_element =
-        curry<3>([](size_t j, size_t k, Estimate e) { return e.second(j, k); });
+    constexpr std::pair seed{false, std::numeric_limits<double>::max()};
 
     // The extracter function is used to get at whichever part of the `record`
     // we want to check for monotonicity.
-    const auto pairwise_monotonic_dec_check = curry<3>(
-        [](const auto extractor, const auto &flagAndPrev, const auto &record) {
-          const auto &[flag, prev] = flagAndPrev;
-          return flag ? flagAndPrev
-                      : std::make_pair(prev > extractor(record),
-                                       extractor(record));
+    //  Record:
+    //  first     second
+    // (State) (Covariance)
+    //    *        * *
+    //    *        * *
+    //
+    constexpr auto covar_element =
+        curry<3>([](size_t j, size_t k, Estimate e) { return e.second(j, k); });
+
+    constexpr auto foldable_is_decreaseing =
+        curry<3>([](const auto extractor, const auto &flagAndPrev,
+                    const auto &record) -> std::pair<bool, double> {
+          // with ...
+          const auto &[flag, prevData] = flagAndPrev;
+          const auto data = extractor(record);
+
+          return flag ? flagAndPrev : std::pair{data < prevData, data};
         });
 
-    bool heightVarianceIsMonotoniclyDecreasing =
+    const bool heightVarianceIsMonotoniclyDecreasing =
         accumulate(estimationSignal, seed,
-                   pairwise_monotonic_dec_check(
-                       extract_estimate_covariance_element(0, 0)))
+                   foldable_is_decreaseing(covar_element(0, 0)))
             .first;
 
     REQUIRE(heightVarianceIsMonotoniclyDecreasing);
 
-    bool speedVarianceIsMonotoniclyDecreasing =
+    const bool speedVarianceIsMonotoniclyDecreasing =
         accumulate(estimationSignal, seed,
-                   pairwise_monotonic_dec_check(
-                       extract_estimate_covariance_element(1, 1)))
+                   foldable_is_decreaseing(covar_element(1, 1)))
             .first;
+
     REQUIRE(speedVarianceIsMonotoniclyDecreasing);
   }
 
   SECTION("... remain in the 90% confidence tube at least 90% of the time.") {
+
     assert(estimationSignal.size() == estimationResidual.size());
-    auto outOfTubeCount = accumulate(
-        view::zip(estimationSignal, estimationResidual), 0,
-        [](int counter, const auto &estimateAndResidual) {
-          const auto &[estimate, residual] = estimateAndResidual;
-          if (residual(0) * residual(0) > 1.65 * 1.65 * estimate.second(0, 0))
-            return ++counter;
-          else
-            return counter;
-        });
+
+    constexpr auto count_if_out_of_tube = [](int counter,
+                                             const auto &estimateAndResidual) {
+      const auto &[estimate, residual] = estimateAndResidual;
+      if (residual(0) * residual(0) > 1.65 * 1.65 * estimate.second(0, 0))
+        return ++counter;
+      else
+        return counter;
+    };
+
+    auto outOfTubeCount =
+        accumulate(view::zip(estimationSignal, estimationResidual), 0,
+                   count_if_out_of_tube);
+
     REQUIRE(outOfTubeCount <= trueData.size() * 0.1);
   }
 }
