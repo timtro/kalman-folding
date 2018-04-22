@@ -68,14 +68,12 @@ using Matrix_bxn = Matrix<double, b, n>;
 using Matrix_bxb = Matrix<double, b, b>;
 using Matrix_nxm = Matrix<double, n, m>;
 using StateTimeSeries = std::array<TimeState, numsamples>;
-//                                           ^time
+// Estimate = (State, n×n) = (State, [[P]])
 using Estimate = std::pair<State, Matrix_nxn>;
-//                         ^x   , ^P
-using Observation =
-    std::tuple<Matrix_nxn, Matrix_nxn, Matrix_nxm, Control, RowState,
-               // ^Xi       , ^Phi      , ^Gamma    , ^u     , ^A
-               Measurement>;
-//             ^z
+// Observation = ([[Xi]], [[Phi]], [[Gamma]], [[u]], [[A]], [[z]])
+//    = (n×n, n×n, n×m, m×1, 1×n, b×1)
+using Observation = std::tuple<Matrix_nxn, Matrix_nxn, Matrix_nxm, Control,
+                               RowState, Measurement>;
 // The observation includes the model and control. Since the model and control
 // input is constant for this example, you'll see that the kalman_fold function
 // takes the measurement from a list and packs it in the tuple with constant
@@ -92,17 +90,17 @@ const StateTimeSeries trueData = []() {
   return result;
 }();
 
-// Ζ (Zeta) -- Measurement noise:
+// Ζ (Zeta) — Measurement noise:
 const Matrix_bxb Zeta = []() {
   Matrix_bxb mat;
   mat << radarNoiseVariance;
   return mat;
 }();
 
-// P0 -- Starting covariance for x
+// P0 — Starting covariance for x
 const auto P0 = Matrix_nxn::Identity() * 9999999999999;
 
-// Φ (Phi) -- State transition matrix (AKA propagator matrix
+// Φ (Phi) — State transition matrix (AKA propagator matrix
 // and fundamental matrix).
 const Matrix_nxn Phi = []() {
   Matrix_nxn mat;
@@ -118,7 +116,7 @@ const Matrix_nxm Gamma = []() {
   return mat;
 }();
 
-// Ξ (Xi) -- Not sure what to call this, but it's part of the evolution of the
+// Ξ (Xi) — Not sure what to call this, but it's part of the evolution of the
 // estimate covariance.
 const Matrix_nxn Xi = []() {
   Matrix_nxn mat;
@@ -127,7 +125,7 @@ const Matrix_nxn Xi = []() {
   return mat;
 }();
 
-// A -- The output matrix. This one selects position from the state vector:
+// A — The output matrix. This one selects position from the state vector:
 //     z = A x = [ 1  0 ] [ h dh/dt ]^T
 const RowState A = []() {
   RowState mat;
@@ -142,11 +140,16 @@ const Control u = []() {
   return mat;
 }();
 
-// The foldable Kalman function. When folded over a recursive structure
-// containing `Measurement`s, one obtains the series of estimated states. (That
+// The foldable Kalman function, when folded over a recursive structure
+// containing `Measurement`s, yields the series of estimated states. (That
 // assumes you get a series out of the fold. A traditional fold will yield only
 // it's most up to date rockoning at the end of the fold)
 constexpr auto kalman = [](Matrix_bxb Z) {
+  // (Estimate, Observation) → Estimate
+  //   = ( (State, n×n), ([[Xi]], [[Phi]], [[Gamma]], [[u]], [[A]], [[z]]) )
+  //        → (State, n×n)
+  //   = ( (n×1, n×n), (n×n, n×n, n×m, m×1, 1×n, b×1) ) → (n×1, n×n)
+  //   = ( (2×1, 2×2), (2×2, 2×2, 2×1, 1×1, 1×2, 1×1) ) → (2×1, 2×2)
   return [&Z](Estimate s, Observation o) -> Estimate {
     // with…
     const auto [x, P] = s;
@@ -160,8 +163,15 @@ constexpr auto kalman = [](Matrix_bxb Z) {
   };
 };
 
-constexpr auto kalman_fold = [](auto f, auto x0,
-                                const std::vector<Measurement> &data) {
+// Normally, fold : ( (A, B) → B, B, [A] ) → B
+// But we want intermediats, so
+//  kalman_fold : ( (A, B) → B, B, [A] ) → [B]
+//    where
+//      A = Measurement
+//      B = Estimate
+constexpr auto kalman_fold =
+    [](auto f, auto x0,
+       const std::vector<Measurement> &data) -> std::vector<Estimate> {
   auto accumulator = x0;
   std::vector<decltype(accumulator)> xs;
   xs.reserve(data.size());
@@ -182,7 +192,9 @@ TEST_CASE("Tracking a falling object with a (simulated) noisy radar, the "
   std::normal_distribution<> gaussDist{0, radarNoiseSigma};
 
   // Reminder:
-  //   trueData : std::array<TimeState, n>
+  //   trueData : std::array<TimeState, N>
+  //      = std::array<([[time]], State), N>
+  //      = std::array<(double, 2×1), N>
   // clang-format off
   const std::vector<Measurement> measuredData =
       trueData 
@@ -191,6 +203,7 @@ TEST_CASE("Tracking a falling object with a (simulated) noisy radar, the "
               return Measurement{x.second(0) + gaussDist(rndEngine)};
             });
   // clang-format on
+
   const auto estimationSignal =
       kalman_fold(kalman(Zeta), Estimate{{0, 0}, P0}, measuredData);
 
@@ -199,7 +212,7 @@ TEST_CASE("Tracking a falling object with a (simulated) noisy radar, the "
       view::zip(trueData, estimationSignal) 
       | view::transform([](const auto &truthAndEstimate) {
           // truth : TimeState = (time, State)
-          // estimate : (State, Matrix_nxn) = (State, P)
+          // estimate : (State, n×n) = (State, P)
           const auto &[truth, estimate] = truthAndEstimate;
           State residual;
 
@@ -215,18 +228,18 @@ TEST_CASE("Tracking a falling object with a (simulated) noisy radar, the "
 
     constexpr std::pair seed{false, std::numeric_limits<double>::max()};
 
-    // The extracter function is used to get at whichever part of the `record`
-    // we want to check for monotonicity.
-    //  Record:
-    //  first     second
-    // (State) (Covariance)
-    //    *        * *
-    //    *        * *
-    //
+    // This function extracts an element from the covariance matrix in a
+    // Measurement.
+    //  Measurement = (State, n×n)
+    //      = ( State, [[Covariance]] )
+    //          ( * )     ( * * )
+    //          ( * )     ( * * )
     constexpr auto covar_element =
         curry<3>([](size_t j, size_t k, Estimate e) { return e.second(j, k); });
 
-    constexpr auto foldable_is_decreaseing =
+    // foldable_is_decreasing :
+    //    ( (A → double), (bool, double), A ) → (bool, double)
+    constexpr auto foldable_is_decreasing =
         curry<3>([](const auto extractor, const auto &flagAndPrev,
                     const auto &record) -> std::pair<bool, double> {
           // with ...
@@ -238,14 +251,14 @@ TEST_CASE("Tracking a falling object with a (simulated) noisy radar, the "
 
     const bool heightVarianceIsMonotoniclyDecreasing =
         accumulate(estimationSignal, seed,
-                   foldable_is_decreaseing(covar_element(0, 0)))
+                   foldable_is_decreasing(covar_element(0, 0)))
             .first;
 
     REQUIRE(heightVarianceIsMonotoniclyDecreasing);
 
     const bool speedVarianceIsMonotoniclyDecreasing =
         accumulate(estimationSignal, seed,
-                   foldable_is_decreaseing(covar_element(1, 1)))
+                   foldable_is_decreasing(covar_element(1, 1)))
             .first;
 
     REQUIRE(speedVarianceIsMonotoniclyDecreasing);
@@ -255,18 +268,18 @@ TEST_CASE("Tracking a falling object with a (simulated) noisy radar, the "
 
     assert(estimationSignal.size() == estimationResidual.size());
 
-    constexpr auto count_if_out_of_tube = [](int counter,
-                                             const auto &estimateAndResidual) {
-      const auto &[estimate, residual] = estimateAndResidual;
-      if (residual(0) * residual(0) > 1.65 * 1.65 * estimate.second(0, 0))
-        return ++counter;
-      else
-        return counter;
-    };
+    constexpr auto foldable_count_if_out_of_tube =
+        [](int counter, const auto &estimateAndResidual) {
+          const auto &[estimate, residual] = estimateAndResidual;
+          if (residual(0) * residual(0) > 1.65 * 1.65 * estimate.second(0, 0))
+            return ++counter;
+          else
+            return counter;
+        };
 
     auto outOfTubeCount =
         accumulate(view::zip(estimationSignal, estimationResidual), 0,
-                   count_if_out_of_tube);
+                   foldable_count_if_out_of_tube);
 
     REQUIRE(outOfTubeCount <= trueData.size() * 0.1);
   }
