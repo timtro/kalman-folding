@@ -151,7 +151,7 @@ constexpr auto kalman = [](Matrix_bxb Z) {
   //   = ( (n×1, n×n), (n×n, n×n, n×m, m×1, 1×n, b×1) ) → (n×1, n×n)
   //   = ( (2×1, 2×2), (2×2, 2×2, 2×1, 1×1, 1×2, 1×1) ) → (2×1, 2×2)
   return [&Z](Estimate s, Observation o) -> Estimate {
-    // with…
+    // with …
     const auto [x, P] = s;
     const auto [Xi, Phi, Gamma, u, A, z] = o;
     const auto x2 = Phi * x + Gamma * u;
@@ -186,7 +186,7 @@ constexpr auto kalman_fold =
 };
 
 TEST_CASE("Tracking a falling object with a (simulated) noisy radar, the "
-          "Kalman filtered signal ...") {
+          "Kalman filtered signal …") {
 
   std::mt19937 rndEngine(seed);
   std::normal_distribution<> gaussDist{0, radarNoiseSigma};
@@ -223,7 +223,7 @@ TEST_CASE("Tracking a falling object with a (simulated) noisy radar, the "
       });
   // clang-format on
 
-  SECTION("...  covariance should decrease monotonically since the measurement "
+  SECTION("…  covariance should decrease monotonically since the measurement "
           "variance is constant.") {
 
     constexpr std::pair seed{false, std::numeric_limits<double>::max()};
@@ -242,7 +242,7 @@ TEST_CASE("Tracking a falling object with a (simulated) noisy radar, the "
     constexpr auto foldable_is_decreasing =
         curry<3>([](const auto extractor, const auto &flagAndPrev,
                     const auto &record) -> std::pair<bool, double> {
-          // with ...
+          // with …
           const auto &[flag, prevData] = flagAndPrev;
           const auto data = extractor(record);
 
@@ -264,14 +264,18 @@ TEST_CASE("Tracking a falling object with a (simulated) noisy radar, the "
     REQUIRE(speedVarianceIsMonotoniclyDecreasing);
   }
 
-  SECTION("... remain in the 90% confidence tube at least 90% of the time.") {
+  SECTION("… remain in the 90% confidence tube at least 90% of the time.") {
 
     assert(estimationSignal.size() == estimationResidual.size());
 
     constexpr auto foldable_count_if_out_of_tube =
         [](int counter, const auto &estimateAndResidual) {
+          // with …
           const auto &[estimate, residual] = estimateAndResidual;
-          if (residual(0) * residual(0) > 1.65 * 1.65 * estimate.second(0, 0))
+          const double heightResidualSqr = residual(0) * residual(0);
+          const double conf90 = 1.65 * 1.65; // The sigma for 90% confidence.
+
+          if (heightResidualSqr > conf90 * estimate.second(0, 0))
             return ++counter;
           else
             return counter;
