@@ -58,7 +58,8 @@ constexpr size_t n = 2; // number of state variables, h and dhdt.
 constexpr size_t b = 1; // number of output variables, just x
 constexpr size_t m = 1; // number of control variables, just acceleration.
 
-using State = Matrix<double, n, 1>;       // Contains a distance and a velocity.
+using State = Matrix<double, n, 1>; // Contains a distance and a velocity.
+using TimeState = std::pair<double, State>;
 using Measurement = Matrix<double, b, 1>; // 1x1, contains just a distance.
 using Control = Matrix<double, m, 1>;     // 1x1, the acceleration.
 using RowState = Matrix<double, 1, n>;
@@ -66,11 +67,8 @@ using Matrix_nxn = Matrix<double, n, n>;
 using Matrix_bxn = Matrix<double, b, n>;
 using Matrix_bxb = Matrix<double, b, b>;
 using Matrix_nxm = Matrix<double, n, m>;
-using StateTimeSeries = std::array<std::pair<double, State>, numsamples>;
+using StateTimeSeries = std::array<TimeState, numsamples>;
 //                                           ^time
-using MeasurementTimeSeries =
-    std::array<std::pair<double, Measurement>, numsamples>;
-//                       ^time
 using Estimate = std::pair<State, Matrix_nxn>;
 //                         ^x   , ^P
 using Observation =
@@ -162,15 +160,14 @@ constexpr auto kalman = [](Matrix_bxb Z) {
   };
 };
 
-constexpr auto kalman_fold = [](auto f, auto x0, MeasurementTimeSeries data) {
+constexpr auto kalman_fold = [](auto f, auto x0,
+                                const std::vector<Measurement> &data) {
   auto accumulator = x0;
   std::vector<decltype(accumulator)> xs;
   xs.reserve(data.size());
 
-  static_assert(trueData.size() == data.size());
-
   for (const auto &datum : data) {
-    Observation obs = {Xi, Phi, Gamma, u, A, Measurement{datum.second}};
+    Observation obs = {Xi, Phi, Gamma, u, A, datum};
     accumulator = f(accumulator, obs);
     xs.push_back(accumulator);
   };
@@ -184,16 +181,16 @@ TEST_CASE("Tracking a falling object with a (simulated) noisy radar, the "
   std::mt19937 rndEngine(seed);
   std::normal_distribution<> gaussDist{0, radarNoiseSigma};
 
-  const auto measuredData = [&gaussDist,
-                             &rndEngine]() -> MeasurementTimeSeries {
-    MeasurementTimeSeries result;
-    for (unsigned k = 0; k < trueData.size(); ++k) {
-      result[k].first = trueData[k].first; // time
-      result[k].second(0) = trueData[k].second(0) + gaussDist(rndEngine);
-    }
-    return result;
-  }();
-
+  // Reminder:
+  //   trueData : std::array<TimeState, n>
+  // clang-format off
+  const std::vector<Measurement> measuredData =
+      trueData 
+        | view::transform(
+            [&gaussDist, &rndEngine](TimeState x) -> Measurement {
+              return Measurement{x.second(0) + gaussDist(rndEngine)};
+            });
+  // clang-format on
   const auto estimationSignal =
       kalman_fold(kalman(Zeta), Estimate{{0, 0}, P0}, measuredData);
 
@@ -201,15 +198,15 @@ TEST_CASE("Tracking a falling object with a (simulated) noisy radar, the "
   const auto estimationResidual =
       view::zip(trueData, estimationSignal) 
       | view::transform([](const auto &truthAndEstimate) {
-        // truth : (time, State)
-        // estimate : (State, Matrix_nxn) = (State, P)
-        const auto &[truth, estimate] = truthAndEstimate;
-        State residual;
+          // truth : TimeState = (time, State)
+          // estimate : (State, Matrix_nxn) = (State, P)
+          const auto &[truth, estimate] = truthAndEstimate;
+          State residual;
 
-        residual << truth.second(0) - estimate.first(0),
-            truth.second(1) - estimate.first(1);
+          residual << truth.second(0) - estimate.first(0),
+              truth.second(1) - estimate.first(1);
 
-        return residual;
+          return residual;
       });
   // clang-format on
 
