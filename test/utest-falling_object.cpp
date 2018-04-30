@@ -1,5 +1,3 @@
-#include "boost/hana/functional/curry.hpp"
-#include "range/v3/all.hpp"
 #include <Eigen/Dense>
 #include <algorithm>
 #include <array>
@@ -12,6 +10,8 @@
 #include <tuple>
 #include <type_traits>
 #include <vector>
+#include "boost/hana/functional/curry.hpp"
+#include "range/v3/all.hpp"
 
 using Eigen::Matrix;
 using namespace ranges;
@@ -54,20 +54,21 @@ using boost::hana::curry;
  *
  */
 
-constexpr double g = 32.174;      // ft / sec^2
-constexpr double dt = 0.1;        // sec
-constexpr double duration = 57.5; // sec
+constexpr double g = 32.174;       // ft / sec^2
+constexpr double dt = 0.1;         // sec
+constexpr double duration = 57.5;  // sec
 constexpr size_t numsamples = duration / dt;
-constexpr double hInit = 400'000; // ft
-constexpr double vInit = -6000;   // ft / sec
-constexpr double accelInit = -g;  // ft / sec^2
+constexpr double hInit = 400'000;  // ft
+constexpr double vInit = -6000;    // ft / sec
+constexpr double accelInit = -g;   // ft / sec^2
 
-constexpr double radarNoiseSigma = 1E3;                                  // ft
-constexpr double radarNoiseVariance = radarNoiseSigma * radarNoiseSigma; // ft^2
+constexpr double radarNoiseSigma = 1E3;  // ft
+constexpr double radarNoiseVariance =
+    radarNoiseSigma * radarNoiseSigma;  // ft^2
 
-constexpr size_t n = 2; // number of state variables, h and dhdt.
-constexpr size_t b = 1; // number of output variables, just h.
-constexpr size_t m = 1; // number of control variables, just acceleration.
+constexpr size_t n = 2;  // number of state variables, h and dhdt.
+constexpr size_t b = 1;  // number of output variables, just h.
+constexpr size_t m = 1;  // number of control variables, just acceleration.
 
 using Mnxn = Matrix<double, n, n>;
 using Mnx1 = Matrix<double, n, 1>;
@@ -89,13 +90,13 @@ using Mmx1 = Matrix<double, m, 1>;
 //    F = / 0 1 \    G = / 0 \
 //        \ 0 0 / '      \ 1 /
 
-using State = Mnx1; // Contains a distance and a velocity.
+using State = Mnx1;  // Contains a distance and a velocity.
 using TimeState = std::pair<double, State>;
-using Measurement = Mbx1; // 1x1, contains just a distance.
-using Control = Mmx1;     // 1x1, the acceleration.
+using Measurement = Mbx1;  // 1x1, contains just a distance.
+using Control = Mmx1;      // 1x1, the acceleration.
 using RowState = M1xn;
 using StateTimeSeries = std::array<TimeState, numsamples>;
-using Estimate = std::pair<State, Mnxn>; // (State, [[P]])
+using Estimate = std::pair<State, Mnxn>;  // (State, [[P]])
 // Observation = ([[Xi]], [[Phi]], [[Gamma]], [[u]], [[A]], [[z]])
 //    = (n×n, n×n, n×m, m×1, 1×n, b×1)
 using Observation =
@@ -105,16 +106,15 @@ using Observation =
 // takes the measurement from a list and packs it in the tuple with constant
 // matrices.
 
-const StateTimeSeries trueData = []() {
-  StateTimeSeries result;
-  for (unsigned k = 0; k < numsamples; ++k) {
-    auto t = k * dt;
-    State next;
-    next << hInit + vInit * t + .5 * accelInit * t * t, vInit + accelInit * t;
-    result[k] = {t, next};
-  }
-  return result;
-}();
+const std::vector<double> ts = view::ints(0, static_cast<int>(numsamples - 1))
+                               | view::transform([](int x) { return x * dt; });
+
+const std::vector<State> trueData =
+    ts | view::transform([](double t) {
+      State next;
+      next << hInit + vInit * t + .5 * accelInit * t * t, vInit + accelInit * t;
+      return next;
+    });
 
 // Ζ (Zeta) — Measurement noise:
 const Mbxb Zeta = []() {
@@ -215,9 +215,9 @@ constexpr auto kalman_fold =
   return xs;
 };
 
-TEST_CASE("Tracking a falling object with a (simulated) noisy radar, the "
-          "Kalman filtered signal …") {
-
+TEST_CASE(
+    "Tracking a falling object with a (simulated) noisy radar, the "
+    "Kalman filtered signal …") {
   std::seed_seq seed{1, 2, 3, 4, 5};
   std::mt19937 rndEngine(seed);
   std::normal_distribution<> gaussDist{0, radarNoiseSigma};
@@ -226,38 +226,31 @@ TEST_CASE("Tracking a falling object with a (simulated) noisy radar, the "
   //   trueData : std::array<TimeState, N>
   //      = std::array<([[time]], State), N>
   //      = std::array<(double, 2×1), N>
-  // clang-format off
   const std::vector<Measurement> measuredData =
-      trueData 
-        | view::transform(
-            [&gaussDist, &rndEngine](TimeState x) -> Measurement {
-              return Measurement{x.second(0) + gaussDist(rndEngine)};
-            });
-  // clang-format on
+      trueData
+      | view::transform([&gaussDist, &rndEngine](State x) -> Measurement {
+          return Measurement{x(0) + gaussDist(rndEngine)};
+        });
 
   const auto estimationSignal =
       kalman_fold(kalman(Zeta), Estimate{{0, 0}, P0}, measuredData);
 
-  // clang-format off
   // estimationResidual : [ State ]
   const auto estimationResidual =
-      view::zip(trueData, estimationSignal) 
-      | view::transform([](const auto &truthAndEstimate) {
-          // truth : TimeState = (time, State)
-          // estmate : (State, n×n) = (State, P)
+      view::zip(trueData, estimationSignal)
+      | view::transform([](const auto &truthAndEstimate) -> State {
+          // NB — estmate : (State, n×n) = (State, P)
           const auto &[truth, estimate] = truthAndEstimate;
           State residual;
-
-          residual << truth.second(0) - estimate.first(0),
-              truth.second(1) - estimate.first(1);
+          residual << truth(0) - estimate.first(0),
+              truth(1) - estimate.first(1);
 
           return residual;
-      });
-  // clang-format on
+        });
 
-  SECTION("…  covariance should decrease monotonically since the measurement "
-          "variance is constant.") {
-
+  SECTION(
+      "…  covariance should decrease monotonically since the measurement "
+      "variance is constant.") {
     constexpr std::pair seed{false, std::numeric_limits<double>::max()};
 
     // This function extracts an element from the covariance matrix in a
@@ -297,7 +290,6 @@ TEST_CASE("Tracking a falling object with a (simulated) noisy radar, the "
   }
 
   SECTION("… remain in the 90% confidence tube at least 90% of the time.") {
-
     assert(estimationSignal.size() == estimationResidual.size());
 
     // foldable_count_if_out_of_tube : ( int, (Estimate, State) ) → int
@@ -307,7 +299,7 @@ TEST_CASE("Tracking a falling object with a (simulated) noisy radar, the "
           // with …
           const auto &[estimate, residual] = estimateAndResidual;
           const double heightResidualSqr = residual(0) * residual(0);
-          const double conf90 = 1.65 * 1.65; // The sigma for 90% confidence.
+          const double conf90 = 1.65 * 1.65;  // The sigma for 90% confidence.
 
           if (heightResidualSqr > conf90 * estimate.second(0, 0))
             return ++counter;
