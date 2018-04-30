@@ -29,7 +29,7 @@ using boost::hana::curry;
  * Beckman's exhibition centres on a textbook example from Zarchan and
  * Musoff [3].
  *
- * This series of test cases explores Beckman's implementation. It's
+ * This series of test cases explores Beckman's implementation in [2]. It's
  * important to keep in mind that this and previously explored
  * implementations suffer numerical stability and efficiency issues. For
  * example, the use of matrix-inversion. Better numerical hygine will be
@@ -41,7 +41,18 @@ using boost::hana::curry;
  *     Approach. 4th Ed. Ch 4.
  */
 
-std::seed_seq seed{1, 2, 3, 4, 5};
+/* Notation:
+ * - [[·]]: Semantic brackets. In this context, can be read roughly as "type
+ *     of ·". Eg., [[time]] = double.
+ *
+ * - [·]: "List-of-·".
+ *
+ * - "foldable": Means a function has an appropriate signauture to be used as a
+ *     binary operation on a fold: (A, B) → B or A → B → B.
+ *
+ * - N×M: an N-by-M matrix. In this program, N×M = Eigen::Matrix<double, N, M>.
+ *
+ */
 
 constexpr double g = 32.174;      // ft / sec^2
 constexpr double dt = 0.1;        // sec
@@ -55,25 +66,40 @@ constexpr double radarNoiseSigma = 1E3;                                  // ft
 constexpr double radarNoiseVariance = radarNoiseSigma * radarNoiseSigma; // ft^2
 
 constexpr size_t n = 2; // number of state variables, h and dhdt.
-constexpr size_t b = 1; // number of output variables, just x
+constexpr size_t b = 1; // number of output variables, just h.
 constexpr size_t m = 1; // number of control variables, just acceleration.
 
-using State = Matrix<double, n, 1>; // Contains a distance and a velocity.
+using Mnxn = Matrix<double, n, n>;
+using Mnx1 = Matrix<double, n, 1>;
+using M1xn = Matrix<double, 1, n>;
+using Mbxn = Matrix<double, b, n>;
+using Mbx1 = Matrix<double, b, 1>;
+using Mbxb = Matrix<double, b, b>;
+using Mnxm = Matrix<double, n, m>;
+using Mmx1 = Matrix<double, m, 1>;
+
+// x : State, u : Control, z : Measurement
+//   x = /   h(t)  \     u = ( -g )
+//       \ dhdt(t) / '
+//
+// d/dt x = F x + G u    // Dynamics model
+//      z = A x          // Relationship between state and measurement.
+//
+//  where
+//    F = / 0 1 \    G = / 0 \
+//        \ 0 0 / '      \ 1 /
+
+using State = Mnx1; // Contains a distance and a velocity.
 using TimeState = std::pair<double, State>;
-using Measurement = Matrix<double, b, 1>; // 1x1, contains just a distance.
-using Control = Matrix<double, m, 1>;     // 1x1, the acceleration.
-using RowState = Matrix<double, 1, n>;
-using Matrix_nxn = Matrix<double, n, n>;
-using Matrix_bxn = Matrix<double, b, n>;
-using Matrix_bxb = Matrix<double, b, b>;
-using Matrix_nxm = Matrix<double, n, m>;
+using Measurement = Mbx1; // 1x1, contains just a distance.
+using Control = Mmx1;     // 1x1, the acceleration.
+using RowState = M1xn;
 using StateTimeSeries = std::array<TimeState, numsamples>;
-// Estimate = (State, n×n) = (State, [[P]])
-using Estimate = std::pair<State, Matrix_nxn>;
+using Estimate = std::pair<State, Mnxn>; // (State, [[P]])
 // Observation = ([[Xi]], [[Phi]], [[Gamma]], [[u]], [[A]], [[z]])
 //    = (n×n, n×n, n×m, m×1, 1×n, b×1)
-using Observation = std::tuple<Matrix_nxn, Matrix_nxn, Matrix_nxm, Control,
-                               RowState, Measurement>;
+using Observation =
+    std::tuple<Mnxn, Mnxn, Mnxm, Control, RowState, Measurement>;
 // The observation includes the model and control. Since the model and control
 // input is constant for this example, you'll see that the kalman_fold function
 // takes the measurement from a list and packs it in the tuple with constant
@@ -91,35 +117,35 @@ const StateTimeSeries trueData = []() {
 }();
 
 // Ζ (Zeta) — Measurement noise:
-const Matrix_bxb Zeta = []() {
-  Matrix_bxb mat;
+const Mbxb Zeta = []() {
+  Mbxb mat;
   mat << radarNoiseVariance;
   return mat;
 }();
 
 // P0 — Starting covariance for x
-const auto P0 = Matrix_nxn::Identity() * 9999999999999;
+const auto P0 = Mnxn::Identity() * 9999999999999;
 
 // Φ (Phi) — State transition matrix (AKA propagator matrix
 // and fundamental matrix).
-const Matrix_nxn Phi = []() {
-  Matrix_nxn mat;
+const Mnxn Phi = []() {
+  Mnxn mat;
   mat << 1.f, dt, 0.f, 1.f;
   return mat;
 }();
 
 // Propagator for the control input's contribution to the IVP:
 //   x[k+1] = Φ x[k] + Γ u[k]
-const Matrix_nxm Gamma = []() {
-  Matrix_nxm mat;
+const Mnxm Gamma = []() {
+  Mnxm mat;
   mat << dt * dt / 2, dt;
   return mat;
 }();
 
 // Ξ (Xi) — Not sure what to call this, but it's part of the evolution of the
 // estimate covariance.
-const Matrix_nxn Xi = []() {
-  Matrix_nxn mat;
+const Mnxn Xi = []() {
+  Mnxn mat;
   mat << dt * dt * dt / 3, dt * dt / 2, dt * dt / 2, dt;
   mat *= 100;
   return mat;
@@ -144,9 +170,12 @@ const Control u = []() {
 // containing `Measurement`s, yields the series of estimated states. (That
 // assumes you get a series out of the fold. A traditional fold will yield only
 // it's most up to date rockoning at the end of the fold)
-constexpr auto kalman = [](Matrix_bxb Z) {
+//
+// The `kalman` function takes a Zeta value and returns a foldable Kalman
+// filter.
+constexpr auto kalman = [](Mbxb Z) {
   // (Estimate, Observation) → Estimate
-  //   = ( (State, n×n), ([[Xi]], [[Phi]], [[Gamma]], [[u]], [[A]], [[z]]) )
+  //   = ( (State, [[P]]), ([[Xi]], [[Phi]], [[Gamma]], [[u]], [[A]], [[z]]) )
   //        → (State, n×n)
   //   = ( (n×1, n×n), (n×n, n×n, n×m, m×1, 1×n, b×1) ) → (n×1, n×n)
   //   = ( (2×1, 2×2), (2×2, 2×2, 2×1, 1×1, 1×2, 1×1) ) → (2×1, 2×2)
@@ -164,11 +193,12 @@ constexpr auto kalman = [](Matrix_bxb Z) {
 };
 
 // Normally, fold : ( (A, B) → B, B, [A] ) → B
-// But we want intermediats, so
+// But we want intermediats, so we want a list of B:
 //  kalman_fold : ( (A, B) → B, B, [A] ) → [B]
 //    where
-//      A = Measurement
-//      B = Estimate
+//      A = Measurement = b×1 = 1×1
+//      B = Estimate = (State, n×n) = (2×1, 2×2)
+// We use vectors as lists, but this is generalized upon later.
 constexpr auto kalman_fold =
     [](auto f, auto x0,
        const std::vector<Measurement> &data) -> std::vector<Estimate> {
@@ -188,6 +218,7 @@ constexpr auto kalman_fold =
 TEST_CASE("Tracking a falling object with a (simulated) noisy radar, the "
           "Kalman filtered signal …") {
 
+  std::seed_seq seed{1, 2, 3, 4, 5};
   std::mt19937 rndEngine(seed);
   std::normal_distribution<> gaussDist{0, radarNoiseSigma};
 
@@ -208,11 +239,12 @@ TEST_CASE("Tracking a falling object with a (simulated) noisy radar, the "
       kalman_fold(kalman(Zeta), Estimate{{0, 0}, P0}, measuredData);
 
   // clang-format off
+  // estimationResidual : [ State ]
   const auto estimationResidual =
       view::zip(trueData, estimationSignal) 
       | view::transform([](const auto &truthAndEstimate) {
           // truth : TimeState = (time, State)
-          // estimate : (State, n×n) = (State, P)
+          // estmate : (State, n×n) = (State, P)
           const auto &[truth, estimate] = truthAndEstimate;
           State residual;
 
@@ -230,10 +262,10 @@ TEST_CASE("Tracking a falling object with a (simulated) noisy radar, the "
 
     // This function extracts an element from the covariance matrix in a
     // Measurement.
-    //  Measurement = (State, n×n)
-    //      = ( State, [[Covariance]] )
-    //          ( * )     ( * * )
-    //          ( * )     ( * * )
+    //  Measurement = (State, [[P]])
+    //      = ( State, 2×1 )
+    //        / * \   / * * \
+    //        \ * /'  \ * * /
     constexpr auto covar_element =
         curry<3>([](size_t j, size_t k, Estimate e) { return e.second(j, k); });
 
@@ -268,6 +300,8 @@ TEST_CASE("Tracking a falling object with a (simulated) noisy radar, the "
 
     assert(estimationSignal.size() == estimationResidual.size());
 
+    // foldable_count_if_out_of_tube : ( int, (Estimate, State) ) → int
+    //    = (int, ((2×1, 2×2), 2x1) → int
     constexpr auto foldable_count_if_out_of_tube =
         [](int counter, const auto &estimateAndResidual) {
           // with …
