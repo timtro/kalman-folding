@@ -71,7 +71,6 @@ TEST_CASE("Functional folding for mean and variance on…", "[prelude3]") {
   };
 
   SECTION("… a vector") {
-
     auto data = std::vector<double>{1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
     const auto [variance, average, count] =
         std::accumulate(cbegin(data), cend(data), State{0, 0, 0}, cume);
@@ -83,7 +82,6 @@ TEST_CASE("Functional folding for mean and variance on…", "[prelude3]") {
 
 // Prelude 4
 TEST_CASE("Static Kalman fold…", "[prelude4]") {
-
   // The oracle's polynomial.
   const auto coefficients = Vector4d{-5, -4, 9, -3};
 
