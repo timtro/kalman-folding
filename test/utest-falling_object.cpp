@@ -80,15 +80,15 @@ using Mnxm = Matrix<double, n, m>;
 using Mmx1 = Matrix<double, m, 1>;
 
 // x : State, u : Control, z : Measurement
-//   x = /   h(t)  \     u = ( -g )
-//       \ dhdt(t) / '
+//   x = /   h(t)  \     u = ( -g )     z = ( h(t) + Noise )
+//       \ dhdt(t) / '               ,
 //
 // d/dt x = F x + G u    // Dynamics model
-//      z = A x          // Relationship between state and measurement.
+//      z = A x + Noise  // Relationship between state and measurement.
 //
 //  where
-//    F = / 0 1 \    G = / 0 \
-//        \ 0 0 / '      \ 1 /
+//    F = / 0 1 \    G = / 0 \    A = ( 1 0 ).
+//        \ 0 0 / '      \ 1 / '
 
 using State = Mnx1;  // Contains a distance and a velocity.
 using TimeState = std::pair<double, State>;
@@ -109,7 +109,7 @@ using Observation =
 const std::vector<double> ts = view::ints(0, static_cast<int>(numsamples - 1))
                                | view::transform([](int x) { return x * dt; });
 
-const std::vector<State> trueData =
+const std::vector<State> groundTruth =
     ts | view::transform([](double t) {
       State next;
       next << hInit + vInit * t + .5 * accelInit * t * t, vInit + accelInit * t;
@@ -223,11 +223,10 @@ TEST_CASE(
   std::normal_distribution<> gaussDist{0, radarNoiseSigma};
 
   // Reminder:
-  //   trueData : std::array<TimeState, N>
-  //      = std::array<([[time]], State), N>
-  //      = std::array<(double, 2×1), N>
+  //   groundTruth : std::vector<State>
+  //      = std::vector<2×1>
   const std::vector<Measurement> measuredData =
-      trueData
+      groundTruth
       | view::transform([&gaussDist, &rndEngine](State x) -> Measurement {
           return Measurement{x(0) + gaussDist(rndEngine)};
         });
@@ -237,7 +236,7 @@ TEST_CASE(
 
   // estimationResidual : [ State ]
   const auto estimationResidual =
-      view::zip(trueData, estimationSignal)
+      view::zip(groundTruth, estimationSignal)
       | view::transform([](const auto &truthAndEstimate) -> State {
           // NB — estmate : (State, n×n) = (State, P)
           const auto &[truth, estimate] = truthAndEstimate;
@@ -311,6 +310,6 @@ TEST_CASE(
         accumulate(view::zip(estimationSignal, estimationResidual), 0,
                    foldable_count_if_out_of_tube);
 
-    REQUIRE(outOfTubeCount <= trueData.size() * 0.1);
+    REQUIRE(outOfTubeCount <= groundTruth.size() * 0.1);
   }
 }
