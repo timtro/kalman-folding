@@ -1,6 +1,11 @@
 # kalman-folding
 Playing with Kalman folding à la Brian Beckman [^kf-1] [^kf-2] [^kf-4].
+
 ***Warning:*** *this is a work in progress.*
+
+***NB:*** I am extending this technique to control systems in general, and nonlinear model predictive control in particular. Check back soon for repositories exhibiting that research.
+
+(To download Dr. Beckman's papers, and see others in the series, [click here](http://vixra.org/author/brian_beckman).)
 
 ## Organisation
 
