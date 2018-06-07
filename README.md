@@ -33,7 +33,7 @@ These files are meant to be self-documenting. If I've been unclear anywhere, and
  * CMake
  * [Catch2](https://github.com/catchorg/Catch2)
  * [Eigen3](ihttp://eigen.tuxfamily.org/index.php?title=Main_Page) (Debian/Ubuntu: `sudo apt install libeigen3-dev`)
- * [Boost.Hana](https://www.boost.org/doc/libs/1_61_0/libs/hana/doc/html/index.html)(only for curring, I'll probably eliminate this dependency if anyone asks.)
+ * [Boost.Hana](https://www.boost.org/doc/libs/1_61_0/libs/hana/doc/html/index.html) (only for Currying, I'll probably eliminate this dependency if anyone asks.)
  * [Range-v3](https://github.com/ericniebler/range-v3)
 
 [^kf-1]: Brian Beckman, Kalman Folding-Part 1. (2016)
