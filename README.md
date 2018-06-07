@@ -37,7 +37,10 @@ These files are meant to be self-documenting. If I've been unclear anywhere, and
  * [Range-v3](https://github.com/ericniebler/range-v3)
 
 [^kf-1]: Brian Beckman, Kalman Folding-Part 1. (2016)
+
 [^kf-2]: Brian Beckman, Kalman Folding 2: Tracking and System Dynamics. (2016)
+
 [^kf-4]: Brian Beckman, Kalman Folding 4: Streams and Observables. (2016)
+
 [^Z&M]: Zarchan and Musoff, Fundamentals of Kalman Filtering: A Practical Approach. 4th Ed. Ch 4.
 
