@@ -106,6 +106,8 @@ TEST_CASE("Starting from the linear least squares on vectors…") {
       observationStream.send(each);
     }
 
+    unlisten();
+
     REQUIRE(reifiedFRPOutput->size() == data.size() + 1 /*+1 for seed*/);
 
     const auto [frpEstimatedCoefficients, frpEstimatedCovariance] =
