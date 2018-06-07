@@ -18,27 +18,14 @@ using namespace ranges;
 using boost::hana::curry;
 
 /* Preludes:
- * In [1], Beckman introduces the static Kalman filter in a series of
- * four preludes, the fourth being an implementation of a static Kalman
- * filter. (Static meaning that model states do not vary with the
- * independent variable) Those preludes are covered in
- * `utest-linear_least_squares.cpp`.
  *
- * In [2], Beckman generalizes to the non-static case, where the
- * model includes a control input term in addition to the drift term.
- * Beckman's exhibition centres on a textbook example from Zarchan and
- * Musoff [3].
- *
- * This series of test cases explores Beckman's implementation in [2]. It's
+ * This series of test cases explores Beckman's implementation in [1]. It's
  * important to keep in mind that this and previously explored
  * implementations suffer numerical stability and efficiency issues. For
  * example, the use of matrix-inversion. Better numerical hygine will be
  * practised in another iteration of the problem.
  *
- * [1] Brian Beckman, Kalman Folding-Part 1. (2016)
- * [2] Brian Beckman, Kalman Folding 2: Tracking and System Dynamics. (2016)
- * [3] Zarchan and Musoff, Fundamentals of Kalman Filtering: A Practical
- *     Approach. 4th Ed. Ch 4.
+ * [1] Brian Beckman, Kalman Folding 2: Tracking and System Dynamics. (2016)
  */
 
 /* Notation:
@@ -298,7 +285,8 @@ TEST_CASE(
           // with …
           const auto &[estimate, residual] = estimateAndResidual;
           const double heightResidualSqr = residual(0) * residual(0);
-          const double conf90 = 1.65 * 1.65;  // The sigma for 90% confidence.
+          constexpr double conf90 =
+              1.65 * 1.65;  // The sigma for 90% confidence.
 
           if (heightResidualSqr > conf90 * estimate.second(0, 0))
             return ++counter;
