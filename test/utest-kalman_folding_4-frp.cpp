@@ -13,7 +13,7 @@ using Eigen::RowVector4d;
 using Eigen::Vector4d;
 using Matrix1d = Eigen::Matrix<double, 1, 1>;
 
-TEST_CASE("Create a stream of...") {
+TEST_CASE("Starting from the linear least squares on vectors…") {
   // The oracle's polynomial.
   const auto coefficients = Vector4d{-5, -4, 9, -3};
 
@@ -49,7 +49,9 @@ TEST_CASE("Create a stream of...") {
   };
 
   // Same as cume, but structured for use with Sodium's accum().
-  auto emuc = [](Matrix1d Z) {
+  // I.e., arguments reversed (thus the name ucme), and wrapped in a
+  // std::function.
+  auto ucme = [](Matrix1d Z) {
     return std::function<State(const Observation&, const State&)>(
         [&Z](const Observation& o, const State& s) -> State {
           // with…
@@ -61,7 +63,10 @@ TEST_CASE("Create a stream of...") {
         });
   };
 
-  SECTION("… given Beckman's data, should produce Beckman's estimates") {
+  SECTION(
+      "… we repeat the computation on vectors and perform the identical "
+      "computation on FRP behaviours (sodium streams), requiring identical "
+      "results.") {
     const auto P0 = Matrix4d::Identity() * 1000.f;
     const auto data =
         std::vector<Observation>{{{1.f, 0.f, 0.f, 0.f}, Matrix1d{-2.28442}},
@@ -72,6 +77,7 @@ TEST_CASE("Create a stream of...") {
     const auto Zeta = Matrix1d{1.f};
     auto seed = State{{0, 0, 0, 0}, P0};
 
+    // First, repeat the calculation on vectors (a static data structure).
     const auto [estimatedCoefficients, estimatedCovariance] = std::accumulate(
         cbegin(data), cend(data), State{{0, 0, 0, 0}, P0}, cume(Zeta));
 
@@ -87,23 +93,23 @@ TEST_CASE("Create a stream of...") {
     REQUIRE(estimatedCovariance(2, 2) == Approx(0.0714031));
     REQUIRE(estimatedCovariance(3, 3) == Approx(0.0693839));
 
-
-    sodium::stream_sink<Observation> obsStream;
-    const auto result = obsStream.accum(seed, emuc(Zeta));
+    // Now, repeat the calculation using FRP.
+    sodium::stream_sink<Observation> observationStream;
+    const auto stateEstimateStream = observationStream.accum(seed, ucme(Zeta));
     std::shared_ptr<std::vector<State>> reifiedFRPOutput{
         new std::vector<State>()};
-    const auto unlisten = result.listen(
+    const auto unlisten = stateEstimateStream.listen(
         [reifiedFRPOutput](State s) { reifiedFRPOutput->push_back(s); });
 
     for (const auto& each : data) {
       sodium::transaction trans;
-      obsStream.send(each);
+      observationStream.send(each);
     }
+
+    REQUIRE(reifiedFRPOutput->size() == data.size() + 1 /*+1 for seed*/);
 
     const auto [frpEstimatedCoefficients, frpEstimatedCovariance] =
         reifiedFRPOutput->back();
-
-    REQUIRE(reifiedFRPOutput->size() == data.size() + 1 /*+1 for seed*/);
 
     REQUIRE(frpEstimatedCoefficients(0) == estimatedCoefficients(0));
     REQUIRE(frpEstimatedCoefficients(1) == estimatedCoefficients(1));
@@ -114,6 +120,5 @@ TEST_CASE("Create a stream of...") {
     REQUIRE(frpEstimatedCovariance(1, 1) == estimatedCovariance(1, 1));
     REQUIRE(frpEstimatedCovariance(2, 2) == estimatedCovariance(2, 2));
     REQUIRE(frpEstimatedCovariance(3, 3) == estimatedCovariance(3, 3));
-
   }
 }
