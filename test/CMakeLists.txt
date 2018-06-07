@@ -15,3 +15,9 @@ set(testname utest-falling_object)
     target_link_libraries (${testname} CATCH ${EIGEN3_LIBRARIES}
       ${RANGE-V3_LIBRARIES})
     create_test(${testname})
+
+  set(testname utest-kalman_folding_4-frp)
+    add_executable (${testname} ${testname}.cpp)
+    target_link_libraries (${testname} CATCH ${EIGEN3_LIBRARIES}
+      ${RANGE-V3_LIBRARIES} "-lsodium" )
+    create_test(${testname})
