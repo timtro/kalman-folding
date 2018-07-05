@@ -49,18 +49,16 @@ TEST_CASE("Starting from the linear least squares on vectors…") {
   };
 
   // Same as cume, but structured for use with Sodium's accum().
-  // I.e., arguments reversed (thus the name ucme), and wrapped in a
-  // std::function.
+  // I.e., argument order reversed (thus the name ucme).
   auto ucme = [](Matrix1d Z) {
-    return std::function<State(const Observation&, const State&)>(
-        [&Z](const Observation& o, const State& s) -> State {
-          // with…
-          const auto [A, z] = o;
-          const auto [x, P] = s;
-          const auto D = Z + A * P * A.transpose();
-          const auto K = P * A.transpose() * D.inverse();
-          return {x + K * (z - A * x), P - K * D * K.transpose()};
-        });
+    return [&Z](const Observation& o, const State& s) -> State {
+      // with…
+      const auto [A, z] = o;
+      const auto [x, P] = s;
+      const auto D = Z + A * P * A.transpose();
+      const auto K = P * A.transpose() * D.inverse();
+      return {x + K * (z - A * x), P - K * D * K.transpose()};
+    };
   };
 
   SECTION(
@@ -94,16 +92,15 @@ TEST_CASE("Starting from the linear least squares on vectors…") {
     REQUIRE(estimatedCovariance(3, 3) == Approx(0.0693839));
 
     // Now, repeat the calculation using FRP.
-    sodium::stream_sink<Observation> observationStream;
-    const auto stateEstimateStream = observationStream.accum(seed, ucme(Zeta));
+    sodium::stream_sink<Observation> sObservations;
+    const auto stateEstimates = sObservations.accum<State>(seed, ucme(Zeta));
     std::shared_ptr<std::vector<State>> reifiedFRPOutput{
         new std::vector<State>()};
-    const auto unlisten = stateEstimateStream.listen(
+    const auto unlisten = stateEstimates.listen(
         [reifiedFRPOutput](State s) { reifiedFRPOutput->push_back(s); });
 
     for (const auto& each : data) {
-      sodium::transaction trans;
-      observationStream.send(each);
+      sObservations.send(each);
     }
 
     unlisten();
