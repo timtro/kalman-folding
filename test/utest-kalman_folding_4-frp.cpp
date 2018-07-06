@@ -7,6 +7,8 @@
 
 #include <iostream>
 
+#include "test-util.hpp"
+
 using Eigen::Matrix;
 using Eigen::Matrix4d;
 using Eigen::RowVector4d;
@@ -93,22 +95,20 @@ TEST_CASE("Starting from the linear least squares on vectors…") {
 
     // Now, repeat the calculation using FRP.
     sodium::stream_sink<Observation> sObservations;
-    const auto stateEstimates = sObservations.accum<State>(seed, ucme(Zeta));
-    std::shared_ptr<std::vector<State>> reifiedFRPOutput{
-        new std::vector<State>()};
-    const auto unlisten = stateEstimates.listen(
-        [reifiedFRPOutput](State s) { reifiedFRPOutput->push_back(s); });
+    const auto sStateEstimates = sObservations.accum<State>(seed, ucme(Zeta));
 
-    for (const auto& each : data) {
-      sObservations.send(each);
-    }
+    auto [unlisten_sStateEstimates, stateEstimateRecord] =
+        util::make_listener(sStateEstimates);
 
-    unlisten();
+    // This loop is the interface between the FRP and the imperative worlds.
+    for (const auto& each : data) sObservations.send(each);
 
-    REQUIRE(reifiedFRPOutput->size() == data.size() + 1 /*+1 for seed*/);
+    unlisten_sStateEstimates();
+
+    REQUIRE(stateEstimateRecord->size() == data.size() + 1 /*+1 for seed*/);
 
     const auto [frpEstimatedCoefficients, frpEstimatedCovariance] =
-        reifiedFRPOutput->back();
+        stateEstimateRecord->back();
 
     REQUIRE(frpEstimatedCoefficients(0) == estimatedCoefficients(0));
     REQUIRE(frpEstimatedCoefficients(1) == estimatedCoefficients(1));

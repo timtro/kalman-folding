@@ -1,10 +1,11 @@
-#include <Eigen/Dense>
 #include <algorithm>
-#include <catch/catch.hpp>
 #include <iostream>
 #include <numeric>
 #include <tuple>
 #include <vector>
+
+#include <Eigen/Dense>
+#include <catch/catch.hpp>
 
 using Eigen::Matrix;
 using Eigen::Matrix4d;
