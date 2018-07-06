@@ -19,6 +19,12 @@ set(perf_bench "-fno-omit-frame-pointer")
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS} ${common} ${debug} ${warnings} ${optimizations_debug}")
 set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS} ${common} ${optimizations_release}")
 
+option(WITH_PLOT "Use GNUPLOT to visualize results" OFF)
+
+if(WITH_PLOT)
+  add_definitions(-DPLOT=1)
+endif()
+
 # for clang++ use -fuse-ld=gold to avoid LD error "File format not recognized"
 if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
   if(CMAKE_BUILD_TYPE MATCHES DEBUG)

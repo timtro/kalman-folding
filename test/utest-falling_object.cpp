@@ -1,7 +1,5 @@
-#include <Eigen/Dense>
 #include <algorithm>
 #include <array>
-#include <catch/catch.hpp>
 #include <cmath>
 #include <iostream>
 #include <limits>
@@ -10,8 +8,14 @@
 #include <tuple>
 #include <type_traits>
 #include <vector>
-#include "boost/hana/functional/curry.hpp"
-#include "range/v3/all.hpp"
+
+#include <Eigen/Dense>
+#include <boost/hana/functional/curry.hpp>
+#include <catch/catch.hpp>
+#include <range/v3/all.hpp>
+
+#include "gnuplot-iostream.h"
+#include "test-util.hpp"
 
 using Eigen::Matrix;
 using namespace ranges;
@@ -299,5 +303,28 @@ TEST_CASE(
                    foldable_count_if_out_of_tube);
 
     REQUIRE(outOfTubeCount <= groundTruth.size() * 0.1);
+
+#ifdef PLOT
+    Gnuplot gp;
+    // gp << "set term wxt\n";
+    gp << "set yr [-1100:1100]\n";
+    gp << "plot '-' u 1:(1.645*sqrt($3)):(1.645*-sqrt($3)) "
+            "title '90% confidence tube' w filledcu fs solid fc rgb '#6699FF55'"
+          ", '-' u 1:2 "
+          "title 'Estimation residual' w l lt 3\n";
+
+    assert(ts.size() == groundTruth.size());
+    assert(estimationSignal.size() = groundTruth.size());
+
+    std::vector<std::tuple<double, double, double>> plotdata;
+    for (size_t k = 0; k < groundTruth.size(); ++k) {
+      // time, residual, diag of cov.
+      plotdata.push_back(
+          {ts[k], estimationResidual[k](0), estimationSignal[k].second(0, 0)});
+    }
+    gp.send1d(plotdata);
+    gp.send1d(plotdata);
+    gp << "pause mouse key\nwhile (MOUSE_CHAR ne 'q') { pause mouse key; }\n";
+#endif
   }
 }
