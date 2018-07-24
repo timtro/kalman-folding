@@ -314,7 +314,7 @@ TEST_CASE(
           "title 'Estimation residual' w l lt 3\n";
 
     assert(ts.size() == groundTruth.size());
-    assert(estimationSignal.size() = groundTruth.size());
+    assert(estimationSignal.size() == groundTruth.size());
 
     std::vector<std::tuple<double, double, double>> plotdata;
     for (size_t k = 0; k < groundTruth.size(); ++k) {
