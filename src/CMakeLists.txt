@@ -30,3 +30,13 @@ set(testname Kalman-Folding-4-frp)
     "-lboost_filesystem")
   endif()
   create_test(${testname})
+
+set(testname Kalman-Folding-4-RxCpp)
+  add_executable (${testname} ${testname}.cpp)
+  target_link_libraries (${testname} CATCH ${EIGEN3_LIBRARIES}
+    ${RANGE-V3_LIBRARIES} "-lsodium" )
+  if (WITH_PLOT)
+  target_link_libraries (${testname} "-lboost_iostreams" "-lboost_system"
+    "-lboost_filesystem")
+  endif()
+  create_test(${testname})

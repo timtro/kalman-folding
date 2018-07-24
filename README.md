@@ -14,6 +14,8 @@ Programs herein are written as unit-tests (using [Catch2](https://github.com/cat
 
 Each of the programs in `/src` correspond to Dr. Beckman's papers, and the filenames in that directory indicate which papers they correspond to.
 
+***NB:*** This code is **not** DRY. There is a bit of repeat code for the sake of self-containedness.
+
 In [^kf-1], Dr. Beckman introduces the static Kalman filter in a series of four preludes, the fourth being an implementation of a static Kalman filter. (Static meaning that model states do not vary with the independent variable). Those preludes are reproduced in `/src/Kalman-Folding-1-Presldes.cpp`.
 
 In [^kf-2], Dr. Beckman generalizes to the non-static case where the model includes a control input term in addition to the drift term. Beckman's exhibition centres on a textbook example from Zarchan and Musoff[^Z&M]. This is reproduced in `/src/Kalman-Folding-2-falling_object.cpp`.
