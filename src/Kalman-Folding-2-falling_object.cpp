@@ -14,8 +14,8 @@
 #include <catch/catch.hpp>
 #include <range/v3/all.hpp>
 
-#include "gnuplot-iostream.h"
-#include "test-util.hpp"
+#include "../include/plotting/gnuplot-iostream.h"
+#include "../include/util/util.hpp"
 
 using Eigen::Matrix;
 using namespace ranges;
@@ -309,7 +309,7 @@ TEST_CASE(
     // gp << "set term wxt\n";
     gp << "set yr [-1100:1100]\n";
     gp << "plot '-' u 1:(1.645*sqrt($3)):(1.645*-sqrt($3)) "
-            "title '90% confidence tube' w filledcu fs solid fc rgb '#6699FF55'"
+          "title '90% confidence tube' w filledcu fs solid fc rgb '#6699FF55'"
           ", '-' u 1:2 "
           "title 'Estimation residual' w l lt 3\n";
 

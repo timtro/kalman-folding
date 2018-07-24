@@ -7,7 +7,8 @@
 
 #include <iostream>
 
-#include "test-util.hpp"
+#include "../include/util/util.hpp"
+#include "../include/util/util-frp.hpp"
 
 using Eigen::Matrix;
 using Eigen::Matrix4d;
