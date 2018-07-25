@@ -7,8 +7,13 @@
 
 #include <iostream>
 
-#include "../include/util/util.hpp"
 #include "../include/util/util-frp.hpp"
+#include "../include/util/util.hpp"
+
+#ifdef PLOT
+#include "../include/plotting/gnuplot-iostream.h"
+#include "../include/plotting/plot-helpers.hpp"
+#endif
 
 using Eigen::Matrix;
 using Eigen::Matrix4d;
@@ -18,10 +23,10 @@ using Matrix1d = Eigen::Matrix<double, 1, 1>;
 
 TEST_CASE("Starting from the linear least squares on vectors…") {
   // The oracle's polynomial.
-  const auto coefficients = Vector4d{-5, -4, 9, -3};
+  const auto coefficients = Vector4d{-3, 9, -4, -5};
 
   const auto f = [&coefficients](double x) -> double {
-    return coefficients.transpose() * Vector4d{x * x * x, x * x, x, 1};
+    return coefficients.transpose() * Vector4d{1, x, x * x, x * x * x};
   };
 
   SECTION("… with polynomial f such that …") {
@@ -69,12 +74,21 @@ TEST_CASE("Starting from the linear least squares on vectors…") {
       "computation on FRP behaviours (sodium streams), requiring identical "
       "results.") {
     const auto P0 = Matrix4d::Identity() * 1000.f;
-    const auto data =
-        std::vector<Observation>{{{1.f, 0.f, 0.f, 0.f}, Matrix1d{-2.28442}},
-                                 {{1.f, 1.f, 1.f, 1.f}, Matrix1d{-4.83168}},
-                                 {{1.f, -1.f, 1.f, -1.f}, Matrix1d{-10.4601}},
-                                 {{1.f, -2.f, 4.f, -8.f}, Matrix1d{1.40488}},
-                                 {{1.f, 2.f, 4.f, 8.f}, Matrix1d{-40.8079}}};
+
+    const std::vector<std::pair<double, double>> dataPoints = {{0., -2.28442},
+                                                               {1., -4.83168},
+                                                               {-1., -10.4601},
+                                                               {-2., 1.40488},
+                                                               {2., -40.8079}};
+    const auto data = [&dataPoints]() {
+      std::vector<Observation> result(dataPoints.size());
+      for (auto& each : dataPoints) {
+        auto& [t, val] = each;
+        result.push_back({{1., t, t * t, t * t * t}, Matrix1d{val}});
+      }
+      return result;
+    }();
+
     const auto Zeta = Matrix1d{1.f};
     auto seed = State{{0, 0, 0, 0}, P0};
 
@@ -120,5 +134,21 @@ TEST_CASE("Starting from the linear least squares on vectors…") {
     REQUIRE(frpEstimatedCovariance(1, 1) == estimatedCovariance(1, 1));
     REQUIRE(frpEstimatedCovariance(2, 2) == estimatedCovariance(2, 2));
     REQUIRE(frpEstimatedCovariance(3, 3) == estimatedCovariance(3, 3));
+
+#ifdef PLOT
+    Gnuplot gp;
+    gp << poly_to_string("f", coefficients) << '\n';
+    gp << poly_to_string("g", frpEstimatedCoefficients) << '\n';
+    gp << poly_covar_tube_to_string("h", "i", frpEstimatedCoefficients,
+                                    frpEstimatedCovariance)
+       << '\n';
+    gp << "set xr [-2:2]\n set yr [-45:5]\n";
+    gp << "plot '+' using 1:(h($1)):(i($1)) title \"90% confidence tube.\" "
+          "with filledcurves closed fc rgb '#6699FF55', "
+          "f(x) title \"Oracle\\\'s polynomial\" w l ls 1, "
+          "g(x) title \"Estimated polynomial\" w l ls 3, '-' w p\n";
+    gp.send1d(dataPoints);
+    gp << "pause mouse key\nwhile (MOUSE_CHAR ne 'q') { pause mouse key;}\n";
+#endif
   }
 }

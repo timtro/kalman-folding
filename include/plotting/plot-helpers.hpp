@@ -2,36 +2,44 @@
 
 #include <string>
 
-#include <boost/format.hpp>
+#include <Eigen/Dense>
 
-#include "gnuplot-iostream.h"
 #include "../util/util.hpp"
+#include "gnuplot-iostream.h"
 
-template <typename Data, typename F>
-void plot_with_tube(std::string title, const Data &data, F ref_func,
-                    double margin) {
-  const std::string tubeColour = "#6699FF55";
+using Eigen::Vector4d;
+using Eigen::Matrix4d;
 
-  Gnuplot gp;
-  gp << "set title '" << title << "'\n"
-     << "plot '-' u 1:2:3 title 'Acceptable margin: analytical ±"
-     << boost::format("%.3f") % margin << "' w filledcu fs solid fc rgb '"
-     << tubeColour
-     << "', '-' u 1:2 "
-        "title 'Test result' w l\n";
+// clang-format off
+auto poly_to_string(std::string symbol, Vector4d coeff){
+  std::ostringstream poly;
+  poly  << symbol << "(x) = ("
+        << coeff(0) << ") + ("
+        << coeff(1) << " * x) + ("
+        << coeff(2) << " * x**2) + ("
+        << coeff(3) << " * x**3)";
+  return poly.str();
+}
+// clang-format on
 
-  auto range = util::fmap(
-      [&](auto x) {
-        // with…
-        const double t = x.first;
-        const double analyt = ref_func(t);
+auto poly_covar_tube_to_string(std::string ubndSymbol, std::string lbndSymbol,
+                          Vector4d coeff, Matrix4d cov) {
+  assert(cov(0, 0) >= 0.);  // Sane covariances are always positive.
+  assert(cov(1, 1) >= 0.);
+  assert(cov(2, 2) >= 0.);
+  assert(cov(3, 3) >= 0.);
+  // with…
+  constexpr double conf90 = 1.65 * 1.65;  // The sigma for 90% confidence.
+  auto ubndCoeff = Vector4d{coeff(0) * (1 + std::sqrt(cov(0, 0))),
+                            coeff(1) * (1 + std::sqrt(cov(1, 1))),
+                            coeff(2) * (1 + std::sqrt(cov(2, 2))),
+                            coeff(3) * (1 + std::sqrt(cov(3, 3)))};
+  auto ubndPoly = poly_to_string(ubndSymbol, ubndCoeff);
+  auto lbndCoeff = Vector4d{coeff(0) * (1 - std::sqrt(cov(0, 0))),
+                            coeff(1) * (1 - std::sqrt(cov(1, 1))),
+                            coeff(2) * (1 - std::sqrt(cov(2, 2))),
+                            coeff(3) * (1 - std::sqrt(cov(3, 3)))};
+  auto lbndPoly = poly_to_string(lbndSymbol, lbndCoeff);
 
-        return std::make_tuple(t, analyt + margin, analyt - margin);
-      },
-      data);
-
-  gp.send1d(range);
-  gp.send1d(data);
-  gp << "pause mouse key\nwhile (MOUSE_CHAR ne 'q') { pause mouse "
-        "key; }\n";
+  return ubndPoly + '\n' + lbndPoly;
 }
