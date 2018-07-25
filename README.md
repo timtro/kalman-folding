@@ -30,6 +30,9 @@ These files are meant to be self-documenting. If I've been unclear anywhere, and
  * [Eigen3](ihttp://eigen.tuxfamily.org/index.php?title=Main_Page) (Debian/Ubuntu: `sudo apt install libeigen3-dev`)
  * [Boost.Hana](https://www.boost.org/doc/libs/1_61_0/libs/hana/doc/html/index.html) (only for Currying, I'll probably eliminate this dependency if anyone asks.)
  * [Range-v3](https://github.com/ericniebler/range-v3)
+ * [Sodium-C++](https://github.com/SodiumAFRP/sodium-cxx) (for the functional reactive programming implementation)
+ * [RxCpp](https://github.com/ReactiveX/RxCpp) (Alternative to FRP.)
+ * [Gnuplot](http://gnuplot.sourceforge.net/) (if you use `cmake -DWITH_PLOT=on`)
 
 [^kf-1]: Brian Beckman, Kalman Folding-Part 1. (2016)
 
