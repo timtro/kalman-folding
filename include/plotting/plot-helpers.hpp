@@ -29,7 +29,6 @@ auto poly_covar_tube_to_string(std::string ubndSymbol, std::string lbndSymbol,
   assert(cov(2, 2) >= 0.);
   assert(cov(3, 3) >= 0.);
   // with…
-  constexpr double conf90 = 1.65 * 1.65;  // The sigma for 90% confidence.
   auto ubndCoeff = Vector4d{coeff(0) * (1 + std::sqrt(cov(0, 0))),
                             coeff(1) * (1 + std::sqrt(cov(1, 1))),
                             coeff(2) * (1 + std::sqrt(cov(2, 2))),

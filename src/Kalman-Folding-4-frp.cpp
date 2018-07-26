@@ -143,7 +143,7 @@ TEST_CASE("Starting from the linear least squares on vectors…") {
                                     frpEstimatedCovariance)
        << '\n';
     gp << "set xr [-2:2]\n set yr [-45:5]\n";
-    gp << "plot '+' using 1:(h($1)):(i($1)) title \"90% confidence tube.\" "
+    gp << "plot '+' using 1:(h($1)):(i($1)) title \"One standard deviation.\" "
           "with filledcurves closed fc rgb '#6699FF55', "
           "f(x) title \"Oracle\\\'s polynomial\" w l ls 1, "
           "g(x) title \"Estimated polynomial\" w l ls 3, '-' w p\n";
