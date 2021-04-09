@@ -3,7 +3,7 @@ cmake_minimum_required (VERSION 2.8)
 project(KalmanFold)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-set(CMAKE_CXX_COMPILER /usr/bin/clang++-7)
+set(CMAKE_CXX_COMPILER /usr/bin/clang++-9)
 set(CMAKE_BUILD_TYPE Debug)
 set(CMAKE_EXPORT_COMPILE_COMMANDS 1)
 

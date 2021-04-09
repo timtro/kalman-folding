@@ -46,7 +46,7 @@ TEST_CASE("Starting from the linear least squares on vectors…") {
   using Observation = std::tuple<RowVector4d, Matrix1d>;
 
   auto cume = [](Matrix1d Z) {
-    return [&Z](State s, Observation o) -> State {
+    return [Z](State s, Observation o) -> State {
       // with…
       const auto [A, z] = o;
       const auto [x, P] = s;
@@ -59,7 +59,7 @@ TEST_CASE("Starting from the linear least squares on vectors…") {
   // Same as cume, but structured for use with Sodium's accum().
   // I.e., argument order reversed (thus the name ucme).
   auto ucme = [](Matrix1d Z) {
-    return [&Z](const Observation& o, const State& s) -> State {
+    return [Z](const Observation& o, const State& s) -> State {
       // with…
       const auto [A, z] = o;
       const auto [x, P] = s;

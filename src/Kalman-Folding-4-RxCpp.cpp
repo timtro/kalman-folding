@@ -47,7 +47,7 @@ TEST_CASE("Starting from the linear least squares on vectors…") {
   using Observation = std::tuple<RowVector4d, Matrix1d>;
 
   auto cume = [](Matrix1d Z) {
-    return [&Z](State s, Observation o) -> State {
+    return [Z](State s, Observation o) -> State {
       // with…
       const auto [A, z] = o;
       const auto [x, P] = s;

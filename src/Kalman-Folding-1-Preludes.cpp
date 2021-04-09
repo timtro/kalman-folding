@@ -111,7 +111,7 @@ TEST_CASE("Static Kalman fold…", "[prelude4]") {
   // function that returns an accumulator.
   //
   auto cume = [](Matrix1d Z) {
-    return [&Z](State s, Observation o) -> State {
+    return [Z](State s, Observation o) -> State {
       // with…
       const auto [A, z] = o;
       const auto [x, P] = s;

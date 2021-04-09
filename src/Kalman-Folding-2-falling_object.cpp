@@ -170,7 +170,7 @@ constexpr auto kalman = [](Mbxb Z) {
   //        → (State, n×n)
   //   = ( (n×1, n×n), (n×n, n×n, n×m, m×1, 1×n, b×1) ) → (n×1, n×n)
   //   = ( (2×1, 2×2), (2×2, 2×2, 2×1, 1×1, 1×2, 1×1) ) → (2×1, 2×2)
-  return [&Z](Estimate s, Observation o) -> Estimate {
+  return [Z](Estimate s, Observation o) -> Estimate {
     // with …
     const auto [x, P] = s;
     const auto [Xi, Phi, Gamma, u, A, z] = o;
